@@ -1,6 +1,6 @@
 # src/lbot/analysis/optimizer.py
 import os
-import sys  # NEU: sys wird für die aktualisierende Zeile benötigt
+import sys
 import argparse
 import json
 import pandas as pd
@@ -8,9 +8,7 @@ import optuna
 import logging
 import optuna
 
-# Wir setzen die Standard-Logs auf "WARNING", damit nur unsere eigene Meldung erscheint.
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
@@ -23,23 +21,18 @@ from lbot.analysis.backtester import Backtester
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# NEU: Überarbeitete Callback-Funktion für eine einzige, sich aktualisierende Zeile
-def progress_callback(study, trial):
+# MODIFIZIERT: Die Funktion akzeptiert jetzt 'n_trials' als Argument
+def progress_callback(study, trial, n_trials):
     """Gibt eine Statusmeldung in einer einzigen, sich aktualisierenden Zeile aus."""
-    n_trials = study.n_trials if study.n_trials is not None else '???'
-    
     best_value_str = "N/A"
     if study.best_value is not None:
         best_value_str = f"{study.best_value:.2f}"
             
-    # Erstelle die Nachricht
     message = f"    - Optimierung läuft: Trial {trial.number + 1}/{n_trials} | Bester Score bisher: {best_value_str}"
     
-    # Schreibe die Nachricht in die Konsole, fülle mit Leerzeichen auf und gehe zum Zeilenanfang
     sys.stdout.write('\r' + message.ljust(80))
     sys.stdout.flush()
     
-    # Wenn der letzte Trial erreicht ist, füge einen finalen Zeilenumbruch hinzu
     if (trial.number + 1) == n_trials:
         sys.stdout.write('\n')
         sys.stdout.flush()
@@ -100,8 +93,13 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
 
     study = optuna.create_study(direction="maximize")
     
-    # Wir übergeben weiterhin unsere eigene Callback-Funktion
-    study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[progress_callback])
+    # MODIFIZIERT: Wir übergeben die 'trials'-Anzahl über eine Lambda-Funktion an den Callback
+    study.optimize(
+        objective,
+        n_trials=trials,
+        n_jobs=jobs,
+        callbacks=[lambda s, t: progress_callback(s, t, trials)]
+    )
     
     if not study.best_trial:
         logging.warning(f"Optuna fand keine gültige Lösung für {symbol} ({timeframe}).")
