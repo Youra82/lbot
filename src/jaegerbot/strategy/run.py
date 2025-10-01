@@ -1,4 +1,4 @@
-# src/jaegerbot/strategy/run.py
+# src/lbot/strategy/run.py
 import os
 import sys
 import json
@@ -10,12 +10,12 @@ import argparse
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
-# --- Kern-Importe ---
-from jaegerbot.utils.exchange import Exchange
-from jaegerbot.utils.ann_model import load_model_and_scaler
-from jaegerbot.utils.trade_manager import full_trade_cycle
-from jaegerbot.utils.telegram import send_message
-from jaegerbot.utils.decorators import run_with_guardian_checks
+# --- Kern-Importe für L-Bot ---
+from lbot.utils.exchange import Exchange
+from lbot.utils.lstm_model import load_model_and_scaler
+from lbot.utils.trade_manager import full_trade_cycle
+from lbot.utils.telegram import send_message
+from lbot.utils.decorators import run_with_guardian_checks
 
 # --- Hilfsfunktionen ---
 def create_safe_filename(symbol, timeframe):
@@ -23,7 +23,7 @@ def create_safe_filename(symbol, timeframe):
 
 def load_config(symbol, timeframe):
     safe_filename = create_safe_filename(symbol, timeframe)
-    config_dir = os.path.join(PROJECT_ROOT, 'src', 'jaegerbot', 'strategy', 'configs')
+    config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Konfigurationsdatei nicht gefunden: {config_path}")
@@ -34,8 +34,8 @@ def setup_logging(symbol, timeframe):
     safe_filename = create_safe_filename(symbol, timeframe)
     log_dir = os.path.join(PROJECT_ROOT, 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f'jaegerbot_{safe_filename}.log')
-    logger = logging.getLogger(f'jaegerbot_{safe_filename}')
+    log_file = os.path.join(log_dir, f'lbot_{safe_filename}.log') # Log-Name angepasst
+    logger = logging.getLogger(f'lbot_{safe_filename}')
     logger.setLevel(logging.INFO)
     logger.propagate = False
     if logger.hasHandlers(): logger.handlers.clear()
@@ -87,7 +87,7 @@ def run_for_account(account, telegram_config, params, model, scaler, logger, mod
     symbol = params['market']['symbol']
     timeframe = params['market']['timeframe']
     
-    logger.info(f"--- Starte JaegerBot für {account_name} auf {symbol} ({timeframe}) ---")
+    logger.info(f"--- Starte L-Bot für {account_name} auf {symbol} ({timeframe}) ---")
     
     exchange = Exchange(account)
     setup_database(account_name, symbol, timeframe)
@@ -111,7 +111,7 @@ def run_for_account(account, telegram_config, params, model, scaler, logger, mod
     )
 
 def main():
-    parser = argparse.ArgumentParser(description="JaegerBot ANN Trading-Skript")
+    parser = argparse.ArgumentParser(description="L-Bot LSTM Trading Skript")
     parser.add_argument('--symbol', required=True, type=str)
     parser.add_argument('--timeframe', required=True, type=str)
     args, _ = parser.parse_known_args()
@@ -131,7 +131,7 @@ def main():
             
         with open(os.path.join(PROJECT_ROOT, 'secret.json'), "r") as f:
             secrets = json.load(f)
-        accounts_to_run = secrets.get('jaegerbot', [])
+        accounts_to_run = secrets.get('lbot', [])
         telegram_config = secrets.get('telegram', {})
 
     except Exception as e:
@@ -141,7 +141,7 @@ def main():
     for account in accounts_to_run:
         run_for_account(account, telegram_config, params, MODEL, SCALER, logger, model_path, scaler_path)
     
-    logger.info(f">>> JaegerBot-ANN-Lauf für {symbol} ({timeframe}) abgeschlossen <<<\n")
+    logger.info(f">>> L-Bot-Lauf für {symbol} ({timeframe}) abgeschlossen <<<\n")
 
 if __name__ == "__main__":
     main()
