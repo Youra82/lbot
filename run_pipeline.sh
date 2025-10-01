@@ -5,7 +5,7 @@ VENV_PATH=".venv/bin/activate"
 source "$VENV_PATH"
 
 echo "======================================================="
-echo "        L-Bot LSTM Trainings-Pipeline (Interaktiv)     "
+echo "       L-Bot LSTM Trainings-Pipeline (Interaktiv)      "
 echo "======================================================="
 
 read -p "Handelspaar(e) eingeben (ohne /USDT, z.B. BTC ETH): " SYMBOLS
