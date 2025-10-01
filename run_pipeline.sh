@@ -1,3 +1,4 @@
+cat << 'EOF' > ./run_pipeline.sh
 #!/bin/bash
 # Interaktive Pipeline zum Trainieren UND Optimieren neuer L-Bot LSTM-Modelle
 
@@ -28,7 +29,6 @@ get_setting() {
     "$VENV_PYTHON" -c "import json; f=open('$SETTINGS_FILE'); print(json.load(f)$1); f.close()"
 }
 
-# ... (Alle Abfragen bleiben gleich) ...
 echo -e "\n${YELLOW}Lade Standardwerte aus settings.json...${NC}"
 DEFAULT_SYMBOLS=$(get_setting "['optimization_settings']['symbols_to_optimize']" | tr -d "[]',\"")
 DEFAULT_TIMEFRAMES=$(get_setting "['optimization_settings']['timeframes_to_optimize']" | tr -d "[]',\"")
@@ -74,7 +74,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${BLUE}>>> STUFE 2/2: Starte Handelsparameter-Optimierung... <<<${NC}"
-# NEU: Setze die Startmethode für die Parallelverarbeitung auf 'spawn' (sicherer für TensorFlow)
+# DIES IST DIE ENTSCHEIDENDE ZEILE, UM DEN DEADLOCK ZU VERHINDERN
 export JOBLIB_START_METHOD=spawn
 "$VENV_PYTHON" "$OPTIMIZER" \
     --symbols "$SYMBOLS" \
@@ -94,3 +94,4 @@ echo -e "      ✅ Pipeline erfolgreich abgeschlossen!      "
 echo -e "${GREEN}=======================================================${NC}"
 
 deactivate
+EOF
