@@ -51,9 +51,9 @@ class Backtester:
 
     def run(self):
         ema_period = self.filter_conf.get('ema_period', 200)
+        ema_col_name = f'ema_{ema_period}'
         
-        # KORRIGIERTE ZEILE: Schließe jetzt auch die EMA-Spalte von der Skalierung aus
-        feature_columns_to_scale = self.data.columns.drop(['close', f'ema_{ema_period}'], errors='ignore')
+        feature_columns_to_scale = self.data.columns.drop(['close', ema_col_name], errors='ignore')
         
         scaled_features_df = self.data.copy()
         scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
@@ -61,9 +61,10 @@ class Backtester:
         position = None
         entry_price = 0
         
-        # Wir iterieren jetzt über den DataFrame mit den skalierten Features
+        model_input_feature_names = scaled_features_df.drop(['close', ema_col_name], errors='ignore').columns
+
         for i in range(self.sequence_length, len(scaled_features_df)):
-            current_price = self.data['close'].iloc[i] # Originalpreis für PnL-Berechnung
+            current_price = self.data['close'].iloc[i]
             
             if position:
                 pnl_pct = (current_price - entry_price) / entry_price
@@ -76,12 +77,9 @@ class Backtester:
                         position = None
             
             if not position:
-                # Nimm die Sequenz aus dem skalierten DataFrame
                 sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
-                
-                # Stelle sicher, dass 'close' und der EMA nicht in den finalen Numpy-Array für das Modell kommen
-                model_input_features = sequence_df.drop(['close', f'ema_{ema_period}'], errors='ignore').values
-                input_data = np.expand_dims(model_input_features, axis=0)
+                model_input_values = sequence_df[model_input_feature_names].values
+                input_data = np.expand_dims(model_input_values, axis=0)
                 
                 prediction = self.model.predict(input_data, verbose=0)[0][0]
                 
@@ -138,10 +136,18 @@ class Backtester:
         self.equity_curve.append(capital + pnl_amount)
 
     def _calculate_metrics(self):
-        df_trades = pd.DataFrame(self.trades)
-        closed_trades = df_trades[df_trades['status'] == 'closed'].copy()
-        if closed_trades.empty:
+        # FINALE KORREKTUR: Prüfen, ob überhaupt Trades gemacht wurden
+        if not self.trades:
             return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
+            
+        df_trades = pd.DataFrame(self.trades)
+        
+        # Sicherheitsabfrage, falls aus irgendeinem Grund kein Trade geschlossen wurde
+        if 'status' not in df_trades.columns or df_trades[df_trades['status'] == 'closed'].empty:
+             return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
+
+        closed_trades = df_trades[df_trades['status'] == 'closed'].copy()
+        
         pnl = (closed_trades['exit_price'] - closed_trades['entry_price']) / closed_trades['entry_price']
         final_equity = self.equity_curve[-1]
         total_pnl_pct = (final_equity / self.start_capital - 1) * 100
