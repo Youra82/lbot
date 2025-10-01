@@ -13,11 +13,13 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 # --- Kern-Importe für L-Bot ---
 from lbot.utils.exchange import Exchange
 from lbot.utils.lstm_model import load_model_and_scaler
-from lbot.utils.trade_manager import full_trade_cycle
+# NEU: Import des neuen Trade Managers
+from lbot.utils.trade_manager import full_trade_cycle 
 from lbot.utils.telegram import send_message
 from lbot.utils.decorators import run_with_guardian_checks
 
 # --- Hilfsfunktionen ---
+# ... (alle Hilfsfunktionen wie create_safe_filename, load_config, setup_logging, get_db_file_path, setup_database, get_state, set_state bleiben UNVERÄNDERT) ...
 def create_safe_filename(symbol, timeframe):
     return f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
 
@@ -34,7 +36,7 @@ def setup_logging(symbol, timeframe):
     safe_filename = create_safe_filename(symbol, timeframe)
     log_dir = os.path.join(PROJECT_ROOT, 'logs')
     os.makedirs(log_dir, exist_ok=True)
-    log_file = os.path.join(log_dir, f'lbot_{safe_filename}.log') # Log-Name angepasst
+    log_file = os.path.join(log_dir, f'lbot_{safe_filename}.log')
     logger = logging.getLogger(f'lbot_{safe_filename}')
     logger.setLevel(logging.INFO)
     logger.propagate = False
@@ -82,7 +84,7 @@ def set_state(account_name, symbol, timeframe, key, value):
 
 # --- Hauptlogik ---
 @run_with_guardian_checks
-def run_for_account(account, telegram_config, params, model, scaler, logger, model_path, scaler_path):
+def run_for_account(account, telegram_config, params, model, scaler, logger, settings, model_path, scaler_path):
     account_name = account.get('name', 'Standard-Account')
     symbol = params['market']['symbol']
     timeframe = params['market']['timeframe']
@@ -99,12 +101,15 @@ def run_for_account(account, telegram_config, params, model, scaler, logger, mod
         logger.warning("Kein Guthaben gefunden oder Fehler beim Abruf. Überspringe den Handelszyklus.")
         return
 
+    # Verwende die neue, zentrale trade_cycle Funktion
     full_trade_cycle(
         exchange=exchange,
         model=model,
         scaler=scaler,
         params=params,
+        settings=settings, # NEU: Globale Settings werden übergeben
         current_balance=current_balance,
+        db_get_state=get_state,
         db_set_state=set_state,
         telegram_config=telegram_config,
         logger=logger
@@ -120,7 +125,13 @@ def main():
     logger = setup_logging(symbol, timeframe)
     
     try:
+        # Lade alle Konfigurationen
         params = load_config(symbol, timeframe)
+        with open(os.path.join(PROJECT_ROOT, 'settings.json'), "r") as f:
+            settings = json.load(f)
+        with open(os.path.join(PROJECT_ROOT, 'secret.json'), "r") as f:
+            secrets = json.load(f)
+            
         safe_filename = create_safe_filename(symbol, timeframe)
         model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
         scaler_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_scaler_{safe_filename}.joblib')
@@ -129,8 +140,6 @@ def main():
         if MODEL is None or SCALER is None:
             raise FileNotFoundError(f"Modell oder Scaler für {symbol} ({timeframe}) nicht gefunden.")
             
-        with open(os.path.join(PROJECT_ROOT, 'secret.json'), "r") as f:
-            secrets = json.load(f)
         accounts_to_run = secrets.get('lbot', [])
         telegram_config = secrets.get('telegram', {})
 
@@ -139,7 +148,8 @@ def main():
         sys.exit(1)
         
     for account in accounts_to_run:
-        run_for_account(account, telegram_config, params, MODEL, SCALER, logger, model_path, scaler_path)
+        # Hänge settings an die Argumente an
+        run_for_account(account, telegram_config, params, MODEL, SCALER, logger, settings, model_path, scaler_path)
     
     logger.info(f">>> L-Bot-Lauf für {symbol} ({timeframe}) abgeschlossen <<<\n")
 
