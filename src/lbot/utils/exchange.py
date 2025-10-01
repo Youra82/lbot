@@ -1,6 +1,7 @@
 # src/lbot/utils/exchange.py
 import ccxt
 import pandas as pd
+from time import sleep
 
 class Exchange:
     def __init__(self, account_config):
@@ -13,13 +14,37 @@ class Exchange:
         })
         self.markets = self.exchange.load_markets()
 
-    def fetch_recent_ohlcv(self, symbol, timeframe, limit=100):
-        data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    def _format_dataframe(self, data):
+        """ Konvertiert die rohen OHLCV-Daten in einen formatierten DataFrame. """
+        if not data:
+            return pd.DataFrame()
         df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
         df.set_index('timestamp', inplace=True)
         df.sort_index(inplace=True)
         return df
+
+    def fetch_ohlcv_since(self, symbol, timeframe, since, limit=1000):
+        """ Holt alle OHLCV-Daten seit einem bestimmten Timestamp. """
+        all_data = []
+        while True:
+            try:
+                data = self.exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+                if not data:
+                    break
+                all_data.extend(data)
+                since = data[-1][0] + 1 # Zeitstempel der nächsten Kerze
+                sleep(self.exchange.rateLimit / 1000) # Respektiere Rate-Limits
+            except Exception as e:
+                print(f"Fehler beim Abrufen von OHLCV-Daten: {e}. Versuche erneut...")
+                sleep(5)
+                continue
+        return self._format_dataframe(all_data)
+
+    def fetch_recent_ohlcv(self, symbol, timeframe, limit=100):
+        """ Holt die letzten N Kerzen (für Live-Trading benötigt). """
+        data = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        return self._format_dataframe(data)
 
     def fetch_ticker(self, symbol):
         return self.exchange.fetch_ticker(symbol)
