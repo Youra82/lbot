@@ -6,9 +6,8 @@ import json
 import pandas as pd
 import optuna
 import logging
-from optuna.integration import TqdmCallback
+# ENTFERNT: from optuna.integration import TqdmCallback
 
-# ... (alle imports bleiben gleich) ...
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
@@ -19,7 +18,7 @@ from lbot.analysis.backtester import Backtester
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ... (Globale Variablen und objective-Funktion bleiben unverändert) ...
+# Globale Variablen
 DATA = None
 MODEL = None
 SCALER = None
@@ -49,35 +48,43 @@ def objective(trial):
     score = metrics['total_pnl_pct'] / (metrics['max_drawdown_pct'] + 1)
     return score if not pd.isna(score) else -999.0
 
-# MODIFIZIERT: Die Funktion zum automatischen Update wurde entfernt
-
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
-    # ... (Diese Funktion bleibt genau so wie in der vorherigen Version) ...
     global DATA, MODEL, SCALER
     logging.info(f"Starte Optimierung für {symbol} ({timeframe})...")
+    
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'}
     exchange = Exchange(dummy_account)
+    
     ema_period = SETTINGS['strategy_filters'].get('ema_period', 200)
     data_raw = get_market_data(exchange, symbol, timeframe, start_date)
     if data_raw.empty:
         logging.error(f"Keine Daten für {symbol}. Überspringe.")
         return None
+        
     DATA = create_ann_features(data_raw[['open', 'high', 'low', 'close', 'volume']], ema_period=ema_period)
+    
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
     scaler_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_scaler_{safe_filename}.joblib')
     MODEL, SCALER = load_model_and_scaler(model_path, scaler_path)
+
     if MODEL is None or SCALER is None:
         logging.error(f"Modell/Scaler für {symbol} nicht gefunden. Überspringe.")
         return None
+
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[TqdmCallback(True)])
+    
+    # MODIFIZIERT: Der 'callbacks'-Parameter wurde entfernt, da TqdmCallback nicht importiert werden kann.
+    study.optimize(objective, n_trials=trials, n_jobs=jobs)
+    
     if not study.best_trial:
         logging.warning(f"Optuna fand keine gültige Lösung für {symbol} ({timeframe}).")
         return None
+
     best_params_dict = study.best_trial.params
     best_score = study.best_trial.value
     logging.info(f"Beste Parameter für {symbol} ({timeframe}) gefunden. Score: {best_score:.2f}")
+
     final_config = {
         "market": {"symbol": symbol, "timeframe": timeframe},
         "strategy": {"prediction_threshold": best_params_dict['prediction_threshold']},
@@ -95,9 +102,11 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     with open(config_path, 'w') as f:
         json.dump(final_config, f, indent=4)
     logging.info(f"Beste Konfiguration gespeichert in: {config_path}")
+
     opti_settings = SETTINGS.get('optimization_settings', {})
     final_backtester = Backtester(data=DATA, model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     final_metrics = final_backtester.run()
+
     return {
         "symbol": symbol,
         "timeframe": timeframe,
@@ -106,18 +115,17 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         "metrics": final_metrics
     }
 
-
 def main():
     global SETTINGS
     SETTINGS = load_settings()
     parser = argparse.ArgumentParser(description="L-Bot Parameter Optimizer")
-    # ... (Argument-Parsing bleibt gleich) ...
     parser.add_argument('--symbols', required=True, type=str)
     parser.add_argument('--timeframes', required=True, type=str)
     parser.add_argument('--start_date', required=True, type=str)
     parser.add_argument('--trials', type=int, default=100)
     parser.add_argument('--jobs', type=int, default=-1)
     args = parser.parse_args()
+
     symbols = [s.upper() + "/USDT:USDT" for s in args.symbols.split()]
     timeframes = args.timeframes.split()
     
@@ -128,7 +136,6 @@ def main():
             if result:
                 all_results.append(result)
 
-    # NEU: Speichere die Ergebnisse in einer Datei, anstatt die Settings zu aktualisieren
     if all_results:
         results_path = os.path.join(PROJECT_ROOT, 'artifacts', 'optimization_results.json')
         os.makedirs(os.path.dirname(results_path), exist_ok=True)
@@ -137,7 +144,6 @@ def main():
         logging.info(f"✅ Optimierung abgeschlossen. {len(all_results)} Ergebnisse wurden in {results_path} gespeichert.")
     else:
         logging.warning("Optimierung beendet, aber keine Ergebnisse zum Speichern gefunden.")
-
 
 if __name__ == "__main__":
     main()
