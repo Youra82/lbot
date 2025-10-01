@@ -8,6 +8,9 @@ import optuna
 import logging
 from joblib import Parallel, delayed
 
+# NEUER IMPORT für den Fortschrittsbalken
+from optuna.integration import TqdmCallback
+
 # Pfad-Konfiguration
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
@@ -19,15 +22,14 @@ from lbot.analysis.backtester import Backtester
 # Logging-Setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Globale Variablen für Daten, Modell und Scaler, um sie nicht in jedem Trial neu zu laden
+# Globale Variablen, um sie nicht in jedem Trial neu zu laden
 DATA = None
 MODEL = None
 SCALER = None
+MAX_DRAWDOWN = 30.0 # Standardwert
 
 def objective(trial):
     """ Die Optuna-Zielfunktion, die für jeden Versuch aufgerufen wird. """
-    
-    # 1. Definiere die zu testenden Parameter
     params = {
         "strategy": {
             "prediction_threshold": trial.suggest_float("prediction_threshold", 0.51, 0.75),
@@ -38,35 +40,24 @@ def objective(trial):
             "leverage": trial.suggest_int("leverage", 1, 20),
             "margin_mode": "isolated"
         },
-        "behavior": {
-            "use_longs": True,
-            "use_shorts": False # Vereinfachung: Optimierer testet nur Longs
-        }
+        "behavior": { "use_longs": True, "use_shorts": False }
     }
 
-    # 2. Führe den Backtest mit diesen Parametern aus
     backtester = Backtester(DATA, MODEL, SCALER, params)
     metrics = backtester.run()
 
-    # 3. Überprüfe die Bedingungen (Constraints)
     if metrics['max_drawdown_pct'] > MAX_DRAWDOWN:
-        # Harte Bedingung: Wenn der Drawdown zu hoch ist, ist der Versuch ungültig.
-        return -999.0 # Gib einen sehr schlechten Wert zurück
+        return -999.0
 
-    # 4. Definiere das Optimierungsziel
-    # Wir wollen den Profit maximieren, aber Drawdown bestrafen.
-    # Ein einfacher Score könnte sein: Profit / (Drawdown + 1)
     score = metrics['total_pnl_pct'] / (metrics['max_drawdown_pct'] + 1)
-    
     return score if not pd.isna(score) else -999.0
 
 def run_optimization_for_pair(symbol, timeframe, start_date, end_date, trials, jobs):
     """ Startet die komplette Optimierung für ein Handelspaar. """
-    global DATA, MODEL, SCALER, MAX_DRAWDOWN
+    global DATA, MODEL, SCALER
     
     logging.info(f"Starte Optimierung für {symbol} ({timeframe})...")
 
-    # Lade Daten, Modell und Scaler einmalig
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'}
     exchange = Exchange(dummy_account)
     data_raw = exchange.fetch_recent_ohlcv(symbol, timeframe, limit=5000)
@@ -81,17 +72,18 @@ def run_optimization_for_pair(symbol, timeframe, start_date, end_date, trials, j
         logging.error(f"Modell/Scaler für {symbol} ({timeframe}) nicht gefunden. Überspringe.")
         return None
 
-    MAX_DRAWDOWN = 30.0 # Harter Filter, kann als Arg übergeben werden
+    # NEU: Initialisiere den TQDM Callback für den Fortschrittsbalken
+    tqdm_callback = TqdmCallback(True)
 
-    # Starte die Optuna-Studie
     study = optuna.create_study(direction="maximize")
-    study.optimize(objective, n_trials=trials, n_jobs=jobs)
+    
+    # NEU: Übergebe den Callback an die optimize-Funktion
+    study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[tqdm_callback])
     
     best_params = study.best_trial.params
     logging.info(f"Beste Parameter für {symbol} ({timeframe}) gefunden: {best_params}")
     logging.info(f"Bester Score: {study.best_trial.value}")
 
-    # Speichere die beste Konfiguration
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
@@ -125,7 +117,6 @@ def main():
     symbols = [s.upper() + "/USDT:USDT" for s in args.symbols.split()]
     timeframes = args.timeframes.split()
     
-    # Hier könnte man die Schleife mit Joblib parallelisieren, für den Anfang sequentiell
     for symbol in symbols:
         for timeframe in timeframes:
             run_optimization_for_pair(symbol, timeframe, None, None, args.trials, args.jobs)
