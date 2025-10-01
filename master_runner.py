@@ -1,4 +1,4 @@
-# jaegerbot/master_runner.py
+# lbot/master_runner.py
 import json
 import os
 import sys
@@ -13,16 +13,15 @@ sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, 'settings.json')
 SECRET_FILE = os.path.join(PROJECT_ROOT, 'secret.json')
 TIMESTAMPS_FILE = os.path.join(PROJECT_ROOT, 'artifacts', 'db', 'last_run_timestamps.json')
-BOT_RUNNER_SCRIPT = os.path.join(PROJECT_ROOT, 'src', 'jaegerbot', 'strategy', 'run.py')
+BOT_RUNNER_SCRIPT = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'run.py')
 VENV_PYTHON = os.path.join(PROJECT_ROOT, '.venv', 'bin', 'python3')
 
 # --- Wichtige Importe aus dem Projekt ---
-from jaegerbot.utils.trade_manager import babysit_open_position
-from jaegerbot.utils.exchange import Exchange
-from jaegerbot.strategy.run import get_state, set_state
+from lbot.utils.trade_manager import babysit_open_position
+from lbot.utils.exchange import Exchange
+from lbot.strategy.run import get_state, set_state
 
 # --- Setup für einfaches Logging ---
-# (Ausgaben gehen dank Cron-Befehl in die cron.log)
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("MasterRunner")
 
@@ -47,45 +46,36 @@ def save_timestamps(timestamps):
 
 def load_strategy_config(symbol, timeframe):
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
-    config_path = os.path.join(PROJECT_ROOT, 'src', 'jaegerbot', 'strategy', 'configs', f'config_{safe_filename}.json')
+    config_path = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs', f'config_{safe_filename}.json')
     return load_json(config_path)
 
 def main():
-    print(f"\n--- Master Runner gestartet um {datetime.now().isoformat()} ---")
+    print(f"\n--- L-Bot Master Runner gestartet um {datetime.now().isoformat()} ---")
 
     settings = load_json(SETTINGS_FILE)
     secrets = load_json(SECRET_FILE)
     
     active_strategies = settings.get('live_trading_settings', {}).get('active_strategies', [])
-    account_config = secrets.get('jaegerbot', [{}])[0]
+    account_config = secrets.get('lbot', [{}])[0]
     telegram_config = secrets.get('telegram', {})
 
     if not active_strategies or not account_config.get('apiKey'):
         print("Keine aktiven Strategien oder API-Schlüssel in settings/secret.json gefunden.")
         return
 
-    # =========================================================================
-    # ▼▼▼ DER BABYSITTER-CHECK (LÄUFT IMMER ZUERST) ▼▼▼
-    # =========================================================================
+    # === DER BABYSITTER-CHECK (LÄUFT IMMER ZUERST) ===
     print("--- Starte Babysitter-Überwachung für alle aktiven Strategien ---")
     try:
         exchange = Exchange(account_config)
         for strategy in active_strategies:
             params = load_strategy_config(strategy['symbol'], strategy['timeframe'])
             if params:
-                babysit_open_position(
-                    exchange, 
-                    params, 
-                    get_state, 
-                    set_state, 
-                    telegram_config, 
-                    log
-                )
+                babysit_open_position(exchange, params, get_state, set_state, telegram_config, log)
     except Exception as e:
         print(f"KRITISCHER FEHLER im Babysitter-Prozess: {e}")
     print("--- Babysitter-Überwachung abgeschlossen ---")
-    # =========================================================================
-
+    
+    # === PRÄZISIONS-SCHEDULING ===
     timestamps = load_json(TIMESTAMPS_FILE)
     now_utc = datetime.now(timezone.utc)
     
@@ -120,7 +110,7 @@ def main():
             timestamps[strategy_id] = now_utc.isoformat()
 
     save_timestamps(timestamps)
-    print("--- Master Runner beendet ---")
+    print("--- L-Bot Master Runner beendet ---")
 
 if __name__ == "__main__":
     main()
