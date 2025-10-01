@@ -1,6 +1,6 @@
 #!/bin/bash
 VENV_PATH=".venv/bin/activate"
-RESULTS_SCRIPT="src/jaegerbot/analysis/show_results.py"
+RESULTS_SCRIPT="src/lbot/analysis/show_results.py"
 
 # Umgebung aktivieren und Skript ausführen
 source "$VENV_PATH"
