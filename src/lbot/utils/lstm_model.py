@@ -24,7 +24,7 @@ def create_ann_features(df_in):
     df.dropna(inplace=True)
     return df
 
-def create_sequences(data, sequence_length=24, future_steps=5, threshold=0.005):
+def create_sequences(data, sequence_length, future_steps, threshold):
     """
     Wandelt einen DataFrame von Features in Sequenzen (X) und ein binäres Ziel (y) um.
     """
@@ -32,7 +32,7 @@ def create_sequences(data, sequence_length=24, future_steps=5, threshold=0.005):
     data['target'] = (data['future_price'] / data['close'] - 1) > threshold
     data.dropna(inplace=True)
     
-    feature_columns = data.columns.drop(['close', 'future_price', 'target'])
+    feature_columns = data.columns.drop(['close', 'future_price', 'target'], errors='ignore')
     
     X, y = [], []
     for i in range(len(data) - sequence_length):
