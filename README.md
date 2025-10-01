@@ -1,5 +1,3 @@
-Absolut. Hier ist die vollständige und finale `README.md` für dein neues L-Bot-Projekt, sauber in einem einzigen Dokumentenfenster zusammengefasst.
-
 -----
 
 # L-Bot
