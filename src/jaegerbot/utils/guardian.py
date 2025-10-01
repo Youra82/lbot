@@ -1,6 +1,7 @@
-# src/jaegerbot/utils/guardian.py
+# src/lbot/utils/guardian.py
 import os
 import hashlib
+import json
 
 class PreFlightCheckError(Exception):
     pass
@@ -36,28 +37,25 @@ class Guardian:
         required_keys = ['market', 'strategy', 'risk', 'behavior']
         for key in required_keys:
             if key not in self.params:
-                raise ValueError(f"Obligatorische Sektion '{key}' fehlt in der Konfiguration.")
+                raise ValueError(f"Sektion '{key}' fehlt in der Konfiguration.")
 
     def _check_risk_parameters(self):
         risk_pct = self.params['risk'].get('risk_per_trade_pct', 0)
         leverage = self.params['risk'].get('leverage', 0)
         if not 0 < risk_pct <= 10:
-            raise ValueError(f"risk_per_trade_pct ({risk_pct}%) liegt außerhalb des sicheren Bereichs (0-10%).")
+            raise ValueError(f"risk_per_trade_pct ({risk_pct}%) ist außerhalb des sicheren Bereichs (0-10%).")
         if not 0 < leverage <= 25:
-            raise ValueError(f"leverage ({leverage}x) liegt außerhalb des sicheren Bereichs (1-25x).")
-        if self.params['risk'].get('risk_reward_ratio', 0) <= 0:
-            raise ValueError("risk_reward_ratio muss größer als 0 sein.")
+            raise ValueError(f"leverage ({leverage}x) ist außerhalb des sicheren Bereichs (1-25x).")
 
     def _check_artifacts_exist(self):
         if not os.path.exists(self.model_path):
-            raise FileNotFoundError(f"Modelldatei nicht gefunden unter: {self.model_path}")
+            raise FileNotFoundError(f"Modelldatei nicht gefunden: {self.model_path}")
         if not os.path.exists(self.scaler_path):
-            raise FileNotFoundError(f"Scaler-Datei nicht gefunden unter: {self.scaler_path}")
+            raise FileNotFoundError(f"Scaler-Datei nicht gefunden: {self.scaler_path}")
 
     def _check_exchange_connection(self):
         try:
-            server_time = self.exchange.exchange.fetch_time()
-            if not server_time:
+            if not self.exchange.exchange.fetch_time():
                 raise ConnectionError("Server-Zeit konnte nicht abgerufen werden.")
         except Exception as e:
             raise ConnectionError(f"Verbindung zur Börse fehlgeschlagen: {e}")
