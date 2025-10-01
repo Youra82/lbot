@@ -6,7 +6,8 @@ pydantic
 requests
 scipy
 ta
-tqdm  
+tqdm
 tensorflow
 scikit-learn
 joblib
+pyarrow
