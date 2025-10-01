@@ -14,7 +14,6 @@ VENV_PATH="$SCRIPT_DIR/.venv/bin/activate"
 SETTINGS_FILE="$SCRIPT_DIR/settings.json"
 TRAINER="src/lbot/analysis/trainer.py"
 OPTIMIZER="src/lbot/analysis/optimizer.py"
-# NEU: Exakter Pfad zum Python-Interpreter im venv
 VENV_PYTHON="$SCRIPT_DIR/.venv/bin/python3"
 
 # --- Umgebung aktivieren ---
@@ -26,11 +25,10 @@ echo -e "${BLUE}=======================================================${NC}"
 
 # --- Python-Helper zum Auslesen der Standardwerte aus settings.json ---
 get_setting() {
-    # NEU: Nutzt den exakten Python-Pfad
     "$VENV_PYTHON" -c "import json; f=open('$SETTINGS_FILE'); print(json.load(f)$1); f.close()"
 }
 
-# ... (der Rest des Skripts bleibt gleich, aber die Python-Aufrufe werden geändert) ...
+# ... (Alle Abfragen bleiben gleich) ...
 echo -e "\n${YELLOW}Lade Standardwerte aus settings.json...${NC}"
 DEFAULT_SYMBOLS=$(get_setting "['optimization_settings']['symbols_to_optimize']" | tr -d "[]',\"")
 DEFAULT_TIMEFRAMES=$(get_setting "['optimization_settings']['timeframes_to_optimize']" | tr -d "[]',\"")
@@ -64,7 +62,6 @@ echo -e "${YELLOW}-------------------------------------------------------${NC}\n
 read -p "Soll der Prozess gestartet werden? (j/n): " confirm && [[ $confirm == [jJ] || $confirm == [jJ][aA] ]] || exit 1
 
 echo -e "\n${BLUE}>>> STUFE 1/2: Starte L-Bot LSTM-Modelltraining... <<<${NC}"
-# NEU: Nutzt den exakten Python-Pfad
 "$VENV_PYTHON" "$TRAINER" \
     --symbols "$SYMBOLS" \
     --timeframes "$TIMEFRAMES" \
@@ -77,7 +74,8 @@ if [ $? -ne 0 ]; then
 fi
 
 echo -e "\n${BLUE}>>> STUFE 2/2: Starte Handelsparameter-Optimierung... <<<${NC}"
-# NEU: Nutzt den exakten Python-Pfad
+# NEU: Setze die Startmethode für die Parallelverarbeitung auf 'spawn' (sicherer für TensorFlow)
+export JOBLIB_START_METHOD=spawn
 "$VENV_PYTHON" "$OPTIMIZER" \
     --symbols "$SYMBOLS" \
     --timeframes "$TIMEFRAMES" \
