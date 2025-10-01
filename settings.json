@@ -1,14 +1,17 @@
 {
+    "security_settings": {
+        "trade_manager_hash": null
+    },
     "live_trading_settings": {
         "use_auto_optimizer_results": false,
         "top_n_strategies_to_trade": 3,
         "active_strategies": [
             {
-                "symbol": "BIO/USDT:USDT",
+                "symbol": "BTC/USDT:USDT",
                 "timeframe": "4h"
             },
             {
-                "symbol": "AAVE/USDT:USDT",
+                "symbol": "ETH/USDT:USDT",
                 "timeframe": "1d"
             }
         ]
@@ -16,9 +19,11 @@
     "optimization_settings": {
         "enabled": false,
         "symbols_to_optimize": [
-            "BIO",
             "BTC",
-            "ETH"
+            "ETH",
+            "SOL",
+            "XRP",
+            "DOGE"
         ],
         "timeframes_to_optimize": [
             "4h",
