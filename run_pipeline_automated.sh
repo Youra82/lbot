@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 VENV_PATH="$SCRIPT_DIR/.venv/bin/activate"
 SETTINGS_FILE="$SCRIPT_DIR/settings.json"
 TRAINER="src/lbot/analysis/trainer.py"
-OPTIMIZER="src/lbot/analysis/optimizer.py" # HINWEIS: Siehe Erklärung unten
+OPTIMIZER="src/lbot/analysis/optimizer.py"
 CACHE_DIR="$SCRIPT_DIR/data/cache"
 TIMESTAMP_FILE="$CACHE_DIR/.last_cleaned"
 
@@ -47,18 +47,19 @@ SYMBOLS=$(get_setting "['optimization_settings']['symbols_to_optimize']" | tr -d
 TIMEFRAMES=$(get_setting "['optimization_settings']['timeframes_to_optimize']" | tr -d "[]',\"")
 LOOKBACK_DAYS=$(get_setting "['optimization_settings']['lookback_days']")
 START_DATE=$(date -d "$LOOKBACK_DAYS days ago" +%F)
-END_DATE=$(date +%F)
+N_TRIALS=$(get_setting "['optimization_settings']['num_trials']")
+N_JOBS=$(get_setting "['optimization_settings']['cpu_cores']")
+
 
 # --- Pipeline starten mit sauberen Argumenten ---
 echo "Optimierung ist aktiviert. Starte Prozesse..."
-echo "Verwende Daten der letzten $LOOKBACK_DAYS Tage."
+echo "Verwende Daten der letzten $LOOKBACK_DAYS Tage (Start: $START_DATE)."
 
 echo ">>> STUFE 1/2: Starte L-Bot LSTM-Modelltraining... <<<"
 python3 "$TRAINER" \
     --symbols "$SYMBOLS" \
     --timeframes "$TIMEFRAMES" \
-    --start_date "$START_DATE" \
-    --end_date "$END_DATE"
+    --start_date "$START_DATE"
 
 if [ $? -ne 0 ]; then
     echo "Fehler im Trainer-Skript. Pipeline wird abgebrochen."
@@ -67,10 +68,18 @@ if [ $? -ne 0 ]; then
 fi
 
 echo ">>> STUFE 2/2: Starte Handelsparameter-Optimierung... <<<"
-# (Siehe wichtiger Hinweis unten)
-# python3 "$OPTIMIZER" --symbols "$SYMBOLS" ...
+python3 "$OPTIMIZER" \
+    --symbols "$SYMBOLS" \
+    --timeframes "$TIMEFRAMES" \
+    --start_date "$START_DATE" \
+    --trials "$N_TRIALS" \
+    --jobs "$N_JOBS"
 
-echo "Hinweis: Der Optimierer-Schritt ist für L-Bot noch nicht implementiert."
+if [ $? -ne 0 ]; then
+    echo "Fehler im Optimizer-Skript. Pipeline wird abgebrochen."
+    deactivate
+    exit 1
+fi
 
 deactivate
 echo "--- Automatischer L-Bot Pipeline-Lauf abgeschlossen ---"
