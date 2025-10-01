@@ -41,7 +41,7 @@ Führe die folgenden Schritte auf einem frischen Ubuntu-Server aus.
 
 ```bash
 # Ersetze dies mit dem Link zu deinem neuen L-Bot Git-Repository
-git clone DEIN_NEUES_L-BOT_REPO.git lbot
+git clone https://github.com/Youra82/lbot.git
 ```
 
 #### 2\. Installations-Skript ausführen
