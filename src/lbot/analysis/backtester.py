@@ -14,7 +14,6 @@ class Backtester:
         self.settings = settings
         self.start_capital = start_capital
         
-        # Lade Einstellungen aus dem settings-Objekt
         model_conf = self.settings['model_settings']
         backtest_conf = self.settings['backtest_settings']
         self.filter_conf = self.settings.get('strategy_filters', {})
@@ -27,41 +26,44 @@ class Backtester:
         self.equity_curve = [start_capital]
 
     def _apply_slippage(self, price, side):
-        # ... (unverändert)
         if side == 'long': return price * (1 + self.slippage)
         elif side == 'short': return price * (1 - self.slippage)
         return price
         
     def _is_trend_filter_ok(self, index, side):
-        """ NEU: Überprüft, ob der Trade mit dem Trend konform ist. """
         if not self.filter_conf.get('use_trend_filter', False):
-            return True # Filter ist deaktiviert
+            return True
 
         ema_period = self.filter_conf.get('ema_period', 200)
         ema_col = f'ema_{ema_period}'
         
         if ema_col not in self.data.columns:
-            return True # EMA-Spalte nicht vorhanden, ignoriere Filter
+            return True
 
         current_price = self.data['close'].iloc[index]
         ema_value = self.data[ema_col].iloc[index]
         
         if side == 'long':
             return current_price > ema_value
-        elif side == 'short': # Für die Zukunft
+        elif side == 'short':
             return current_price < ema_value
         return False
 
     def run(self):
-        """ Führt den kompletten Backtest durch. """
-        feature_columns_to_scale = self.data.columns.drop(['close'], errors='ignore')
-        scaled_features = self.scaler.transform(self.data[feature_columns_to_scale])
+        ema_period = self.filter_conf.get('ema_period', 200)
+        
+        # KORRIGIERTE ZEILE: Schließe jetzt auch die EMA-Spalte von der Skalierung aus
+        feature_columns_to_scale = self.data.columns.drop(['close', f'ema_{ema_period}'], errors='ignore')
+        
+        scaled_features_df = self.data.copy()
+        scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
         
         position = None
         entry_price = 0
         
-        for i in range(self.sequence_length, len(scaled_features)):
-            current_price = self.data['close'].iloc[i]
+        # Wir iterieren jetzt über den DataFrame mit den skalierten Features
+        for i in range(self.sequence_length, len(scaled_features_df)):
+            current_price = self.data['close'].iloc[i] # Originalpreis für PnL-Berechnung
             
             if position:
                 pnl_pct = (current_price - entry_price) / entry_price
@@ -74,13 +76,17 @@ class Backtester:
                         position = None
             
             if not position:
-                sequence = scaled_features[i - self.sequence_length : i]
-                input_data = np.expand_dims(sequence, axis=0)
+                # Nimm die Sequenz aus dem skalierten DataFrame
+                sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
+                
+                # Stelle sicher, dass 'close' und der EMA nicht in den finalen Numpy-Array für das Modell kommen
+                model_input_features = sequence_df.drop(['close', f'ema_{ema_period}'], errors='ignore').values
+                input_data = np.expand_dims(model_input_features, axis=0)
+                
                 prediction = self.model.predict(input_data, verbose=0)[0][0]
                 
                 pred_threshold = self.params['strategy']['prediction_threshold']
                 
-                # HIER WIRD DER NEUE FILTER ANGEWENDET
                 if (prediction >= pred_threshold and 
                     self.params['behavior']['use_longs'] and 
                     self._is_trend_filter_ok(i, 'long')):
@@ -99,7 +105,6 @@ class Backtester:
         return self._calculate_metrics()
 
     def _open_position(self, index, side):
-        # ... (unverändert)
         raw_price = self.data['close'].iloc[index]
         entry_price_with_slippage = self._apply_slippage(raw_price, side)
         
@@ -112,7 +117,6 @@ class Backtester:
         })
 
     def _close_position(self, index, reason):
-        # ... (unverändert)
         trade = self.trades[-1]
         if trade['status'] != 'open': return
         raw_price = self.data['close'].iloc[index]
@@ -133,9 +137,7 @@ class Backtester:
         pnl_amount = (capital * pnl_pct * leverage) - total_fees
         self.equity_curve.append(capital + pnl_amount)
 
-
     def _calculate_metrics(self):
-        # ... (unverändert)
         df_trades = pd.DataFrame(self.trades)
         closed_trades = df_trades[df_trades['status'] == 'closed'].copy()
         if closed_trades.empty:
