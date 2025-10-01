@@ -37,8 +37,7 @@ Führe die folgenden Schritte auf einem frischen Ubuntu-Server aus.
 #### 1. Projekt klonen
 
 ```bash
-# Ersetze dies mit dem Link zu deinem L-Bot Git-Repository
-git clone https://github.com/Youra82/lbot.git
+
 ---
 
 ## Installation 🚀
@@ -47,9 +46,7 @@ Führe die folgenden Schritte auf einem frischen Ubuntu-Server aus.
 
 #### 1. Projekt klonen
 
-```bash
-# Ersetze dies mit dem Link zu deinem L-Bot Git-Repository
-git clone [https://github.com/Youra82/lbot.git](https://github.com/Youra82/lbot.git)
+git clone https://github.com/Youra82/lbot.git
 ````
 
 #### 2\. Installations-Skript ausführen
