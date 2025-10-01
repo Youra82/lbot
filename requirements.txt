@@ -1,0 +1,12 @@
+ccxt==4.3.5
+numpy
+optuna
+pandas
+pydantic
+requests
+scipy
+ta
+tqdm
+tensorflow
+scikit-learn
+joblib

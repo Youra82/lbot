@@ -1,0 +1,39 @@
+{
+    "live_trading_settings": {
+        "use_auto_optimizer_results": false,
+        "top_n_strategies_to_trade": 3,
+        "active_strategies": [
+            {
+                "symbol": "BIO/USDT:USDT",
+                "timeframe": "4h"
+            },
+            {
+                "symbol": "AAVE/USDT:USDT",
+                "timeframe": "1d"
+            }
+        ]
+    },
+    "optimization_settings": {
+        "enabled": false,
+        "symbols_to_optimize": [
+            "BIO",
+            "BTC",
+            "ETH"
+        ],
+        "timeframes_to_optimize": [
+            "4h",
+            "6h",
+            "1d"
+        ],
+        "lookback_days": 120,
+        "start_capital": 20,
+        "cpu_cores": 2,
+        "num_trials": 500,
+        "auto_clear_cache_days": 30,
+        "constraints": {
+            "max_drawdown_pct": 25,
+            "min_win_rate_pct": 55,
+            "min_pnl_pct": 500
+        }
+    }
+}
