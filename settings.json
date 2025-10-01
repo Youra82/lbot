@@ -7,6 +7,10 @@
         "batch_size": 32,
         "validation_split": 0.1
     },
+    "strategy_filters": {
+        "use_trend_filter": true,
+        "ema_period": 200
+    },
     "backtest_settings": {
         "fee_rate_pct": 0.06,
         "slippage_pct": 0.02
@@ -28,16 +32,10 @@
     "optimization_settings": {
         "enabled": false,
         "symbols_to_optimize": [
-            "BTC",
-            "ETH",
-            "SOL",
-            "XRP",
-            "DOGE"
+            "BTC", "ETH", "SOL", "XRP", "DOGE"
         ],
         "timeframes_to_optimize": [
-            "4h",
-            "6h",
-            "1d"
+            "4h", "6h", "1d"
         ],
         "lookback_days": 120,
         "start_capital": 1000,
@@ -45,9 +43,9 @@
         "num_trials": 500,
         "auto_clear_cache_days": 30,
         "constraints": {
-            "max_drawdown_pct": 25,
-            "min_win_rate_pct": 55,
-            "min_pnl_pct": 500
+            "max_drawdown_pct": 20,
+            "min_win_rate_pct": 45,
+            "min_pnl_pct": 200
         }
     }
 }
