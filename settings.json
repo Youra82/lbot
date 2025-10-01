@@ -1,6 +1,15 @@
 {
-    "security_settings": {
-        "trade_manager_hash": null
+    "model_settings": {
+        "sequence_length": 24,
+        "future_steps": 5,
+        "prediction_threshold_classify": 0.005,
+        "epochs": 50,
+        "batch_size": 32,
+        "validation_split": 0.1
+    },
+    "backtest_settings": {
+        "fee_rate_pct": 0.06,
+        "slippage_pct": 0.02
     },
     "live_trading_settings": {
         "use_auto_optimizer_results": false,
@@ -31,8 +40,8 @@
             "1d"
         ],
         "lookback_days": 120,
-        "start_capital": 20,
-        "cpu_cores": 2,
+        "start_capital": 1000,
+        "cpu_cores": -1,
         "num_trials": 500,
         "auto_clear_cache_days": 30,
         "constraints": {
