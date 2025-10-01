@@ -68,11 +68,16 @@ def main():
     try:
         exchange = Exchange(account_config)
         for strategy in active_strategies:
-            params = load_strategy_config(strategy['symbol'], strategy['timeframe'])
-            if params:
-                babysit_open_position(exchange, params, get_state, set_state, telegram_config, log)
+            try:
+                params = load_strategy_config(strategy['symbol'], strategy['timeframe'])
+                if params:
+                    babysit_open_position(exchange, params, get_state, set_state, telegram_config, log)
+            except Exception as e:
+                # VERBESSERUNG: Fehler wird pro Strategie abgefangen, nicht für den ganzen Prozess
+                strategy_id = f"{strategy.get('symbol', 'N/A')}_{strategy.get('timeframe', 'N/A')}"
+                print(f"FEHLER im Babysitter-Prozess für {strategy_id}: {e}")
     except Exception as e:
-        print(f"KRITISCHER FEHLER im Babysitter-Prozess: {e}")
+        print(f"KRITISCHER FEHLER beim Initialisieren der Exchange für den Babysitter: {e}")
     print("--- Babysitter-Überwachung abgeschlossen ---")
     
     # === PRÄZISIONS-SCHEDULING ===
