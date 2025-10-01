@@ -6,7 +6,13 @@ import json
 import pandas as pd
 import optuna
 import logging
-# ENTFERNT: from optuna.integration import TqdmCallback
+
+# NEU: Wir importieren optuna wieder direkt...
+import optuna
+
+# NEU: ...und setzen die Standard-Logs auf "WARNING", damit nur noch unsere eigene Meldung erscheint.
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
@@ -18,7 +24,18 @@ from lbot.analysis.backtester import Backtester
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# Globale Variablen
+
+# NEU: Eigene Callback-Funktion für die Fortschrittsanzeige
+def progress_callback(study, trial):
+    """Gibt eine Statusmeldung für den Fortschritt der Optimierung aus."""
+    n_trials = study.n_trials if study.n_trials is not None else 'unbekannt'
+    
+    # Gib Meldung für den 1. Trial, jeden 10. und den allerletzten aus.
+    if trial.number == 0 or (trial.number + 1) % 10 == 0 or (trial.number + 1) == n_trials:
+        best_value_str = f"{study.best_value:.2f}" if study.best_value is not None else "N/A"
+        print(f"    - Trial {trial.number + 1} / {n_trials} abgeschlossen. Bester Score bisher: {best_value_str}")
+
+
 DATA = None
 MODEL = None
 SCALER = None
@@ -50,7 +67,7 @@ def objective(trial):
 
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     global DATA, MODEL, SCALER
-    logging.info(f"Starte Optimierung für {symbol} ({timeframe})...")
+    logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
     
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'}
     exchange = Exchange(dummy_account)
@@ -74,8 +91,8 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
 
     study = optuna.create_study(direction="maximize")
     
-    # MODIFIZIERT: Der 'callbacks'-Parameter wurde entfernt, da TqdmCallback nicht importiert werden kann.
-    study.optimize(objective, n_trials=trials, n_jobs=jobs)
+    # MODIFIZIERT: Wir übergeben unsere eigene Callback-Funktion
+    study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[progress_callback])
     
     if not study.best_trial:
         logging.warning(f"Optuna fand keine gültige Lösung für {symbol} ({timeframe}).")
@@ -129,9 +146,14 @@ def main():
     symbols = [s.upper() + "/USDT:USDT" for s in args.symbols.split()]
     timeframes = args.timeframes.split()
     
+    total_jobs = len(symbols) * len(timeframes)
+    job_count = 0
+    
     all_results = []
     for symbol in symbols:
         for timeframe in timeframes:
+            job_count += 1
+            logging.info(f"--- Paket {job_count}/{total_jobs}: Start für {symbol} ({timeframe}) ---")
             result = run_optimization_for_pair(symbol, timeframe, args.start_date, args.trials, args.jobs)
             if result:
                 all_results.append(result)
