@@ -1,8 +1,3 @@
-Selbstverständlich\! Ich habe deine `README.md` aktualisiert, um die neuesten Code-Änderungen widerzuspiegeln (Caching, neue Konfigurationen etc.) und habe sie um viele weitere nützliche Bash-Befehle für die tägliche Verwaltung deines Bots auf dem Server erweitert.
-
-Hier ist die vollständige, überarbeitete `README.md` in einem Fenster, wie gewünscht:
-
-````markdown
 # L-Bot
 
 Ein vollautomatischer Trading-Bot für Krypto-Futures auf der Bitget-Börse, basierend auf einem **Long Short-Term Memory (LSTM)** neuronalen Netzwerk.
@@ -33,6 +28,17 @@ Der L-Bot ist auf maximale Robustheit und Autonomie ausgelegt.
     * Der **Guardian-Decorator** führt vor jedem Trade automatisierte Sicherheits-Checks durch (API-Verbindung, Konfiguration, Risikoparameter).
     * Die **Trade-Manager-Logik** führt den Handel aus, inklusive robuster Routinen zur Absicherung der Position.
 
+---
+
+## Installation 🚀
+
+Führe die folgenden Schritte auf einem frischen Ubuntu-Server aus.
+
+#### 1. Projekt klonen
+
+```bash
+# Ersetze dies mit dem Link zu deinem L-Bot Git-Repository
+git clone [https://github.com/Youra82/lbot.git](https://github.com/Youra82/lbot.git)
 ---
 
 ## Installation 🚀
