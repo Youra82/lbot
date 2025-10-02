@@ -36,7 +36,7 @@ DEFAULT_LOOKBACK=$(get_setting "['optimization_settings']['lookback_days']")
 DEFAULT_TRIALS=$(get_setting "['optimization_settings']['num_trials']")
 DEFAULT_JOBS=$(get_setting "['optimization_settings']['cpu_cores']")
 
-# --- Interaktive Abfrage der Schlüsselwerte mit integrierter Automatik-Option ---
+# --- Interaktive Abfrage der Schlüsselwerte ---
 echo -e "\n${CYAN}--- Bitte Parameter für den Lauf festlegen ---${NC}"
 echo -e "${CYAN}(Einfach Enter drücken, um den vorgeschlagenen Wert zu übernehmen)${NC}"
 
@@ -45,6 +45,21 @@ SYMBOLS="${INPUT_SYMBOLS:-$DEFAULT_SYMBOLS}"
 
 read -p "Zeitfenster eingeben [Vorschlag: ${DEFAULT_TIMEFRAMES}]: " INPUT_TIMEFRAMES
 TIMEFRAMES="${INPUT_TIMEFRAMES:-$DEFAULT_TIMEFRAMES}"
+
+# NEU: HILFSTABELLE FÜR DATEN-RÜCKBLICK
+echo -e "\n${CYAN}--- Info: Empfehlungen für den Daten-Rückblick (Ziel: ca. 2.000-10.000 Kerzen) ---${NC}"
+printf "+---------------+--------------------------------+--------------------------------+\n"
+printf "| Zeitfenster   | Empfohlener Rückblick (Tage)   | Resultierende Kerzen (ca.)     |\n"
+printf "+---------------+--------------------------------+--------------------------------+\n"
+printf "| 5m            | 15 - 30 Tage                   | 4.300 - 8.600                  |\n"
+printf "| 15m           | 45 - 90 Tage                   | 4.300 - 8.600                  |\n"
+printf "| 30m           | 90 - 180 Tage (3-6 Monate)     | 4.300 - 8.600                  |\n"
+printf "| 1h            | 180 - 365 Tage (6-12 Monate)   | 4.300 - 8.700                  |\n"
+printf "| 2h            | 365 - 540 Tage (1-1.5 Jahre)   | 4.300 - 6.400                  |\n"
+printf "| 4h            | 730 Tage (2 Jahre)             | ~4.400                         |\n"
+printf "| 6h            | 1095 Tage (3 Jahre)            | ~4.400                         |\n"
+printf "| 1d            | 1095 - 1825 Tage (3-5 Jahre)   | ~1.100 - 1.800 (Kompromiss)    |\n"
+printf "+---------------+--------------------------------+--------------------------------+\n"
 
 read -p "Daten-Rückblick in Tagen (für Automatik 'a' eingeben) [Vorschlag: ${DEFAULT_LOOKBACK}]: " INPUT_LOOKBACK
 
@@ -73,7 +88,7 @@ else
     LOOKBACK="${INPUT_LOOKBACK:-$DEFAULT_LOOKBACK}"
 fi
 
-# NEU: ERWEITERTE HILFSTABELLE FÜR DIE ANZAHL DER TRIALS
+# HILFSTABELLE FÜR DIE ANZAHL DER TRIALS
 echo -e "\n${CYAN}--- Info: Empfehlungen für die Anzahl der Trials (Zeitschätzungen sind sehr grob!) ---${NC}"
 printf "+-------------+------------------------+-------------------------+--------------------------+\n"
 printf "| Zeitfenster | ${YELLOW}Schnell (ca. Zeit)${NC}     | ${GREEN}Empfohlen (ca. Zeit)${NC}    | ${CYAN}Gründlich (ca. Zeit)${NC}   |\n"
