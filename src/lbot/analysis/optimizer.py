@@ -27,37 +27,39 @@ class BenchmarkCallback:
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
         self.start_time = None
-        self.warmup_trials = 2 # Die ersten Trials sind zum "Aufwärmen"
+        self.warmup_trials = 2
+
+    # NEU: Kleine Hilfsfunktion, um Sekunden schön zu formatieren
+    def _format_seconds(self, seconds: int) -> str:
+        minutes, sec = divmod(seconds, 60)
+        return f"{minutes}m {sec}s"
 
     def __call__(self, study, trial):
-        # Beim ersten Aufruf die Startzeit speichern
         if self.start_time is None:
             self.start_time = time.time()
         
+        now = time.time()
+        elapsed_seconds = now - self.start_time
+        elapsed_str = self._format_seconds(int(elapsed_seconds))
+
         eta_str = "berechne..."
-        # Nur nach der Aufwärmphase mit der ETA-Berechnung beginnen
         if trial.number >= self.warmup_trials:
-            now = time.time()
-            elapsed_seconds = now - self.start_time
             avg_time_per_trial = elapsed_seconds / (trial.number + 1)
             remaining_trials = self.n_trials - (trial.number + 1)
             
-            # ETA in Sekunden berechnen (geteilt durch Anzahl der Jobs)
+            eta_seconds = 0
             if self.n_jobs > 1:
-                # Bei paralleler Ausführung wird die Zeit pro "Welle" an Jobs berechnet
                 eta_seconds = int(avg_time_per_trial * remaining_trials / self.n_jobs)
             else:
                 eta_seconds = int(avg_time_per_trial * remaining_trials)
-
-            # ETA in Minuten und Sekunden umrechnen
-            eta_minutes, eta_sec = divmod(eta_seconds, 60)
-            eta_str = f"ca. {eta_minutes}m {eta_sec}s"
+            eta_str = f"ca. {self._format_seconds(eta_seconds)}"
 
         best_value_str = "N/A"
         if study.best_value is not None:
             best_value_str = f"{study.best_value:.2f}"
             
-        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | ETA: {eta_str} | Bester Score: {best_value_str}"
+        # MODIFIZIERT: 'Laufzeit' zur Nachricht hinzugefügt
+        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | Laufzeit: {elapsed_str} | ETA: {eta_str} | Bester Score: {best_value_str}"
         
         sys.stdout.write('\r' + message.ljust(90))
         sys.stdout.flush()
@@ -122,10 +124,8 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
 
     study = optuna.create_study(direction="maximize")
     
-    # Wir erstellen eine Instanz unseres neuen Benchmark-Callbacks
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
     
-    # und übergeben sie an den optimize-Aufruf
     study.optimize(
         objective,
         n_trials=trials,
@@ -193,7 +193,7 @@ def main():
         for timeframe in timeframes:
             job_count += 1
             logging.info(f"--- Paket {job_count}/{total_jobs}: Start für {symbol} ({timeframe}) ---")
-            result = run_optimization_for_pair(symbol, timeframe, args.start_date, args.trials, int(args.jobs))
+            result = run_optimization_for_pair(symbol, timeframe, args.start_date, int(args.trials), int(args.jobs))
             if result:
                 all_results.append(result)
 
