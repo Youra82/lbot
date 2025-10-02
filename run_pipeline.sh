@@ -46,7 +46,6 @@ SYMBOLS="${INPUT_SYMBOLS:-$DEFAULT_SYMBOLS}"
 read -p "Zeitfenster eingeben [Vorschlag: ${DEFAULT_TIMEFRAMES}]: " INPUT_TIMEFRAMES
 TIMEFRAMES="${INPUT_TIMEFRAMES:-$DEFAULT_TIMEFRAMES}"
 
-# NEU: Integrierte Automatik-Wahl beim Daten-Rückblick
 read -p "Daten-Rückblick in Tagen (für Automatik 'a' eingeben) [Vorschlag: ${DEFAULT_LOOKBACK}]: " INPUT_LOOKBACK
 
 if [[ "$INPUT_LOOKBACK" == "a" || "$INPUT_LOOKBACK" == "A" ]]; then
@@ -71,9 +70,19 @@ if [[ "$INPUT_LOOKBACK" == "a" || "$INPUT_LOOKBACK" == "A" ]]; then
     done
     echo -e "${GREEN}✔ Automatischer Daten-Rückblick für '${TIMEFRAMES}' auf ${LOOKBACK} Tage gesetzt.${NC}"
 else
-    # Standardverhalten, wenn nicht 'a' eingegeben wird
     LOOKBACK="${INPUT_LOOKBACK:-$DEFAULT_LOOKBACK}"
 fi
+
+# NEU: ERWEITERTE HILFSTABELLE FÜR DIE ANZAHL DER TRIALS
+echo -e "\n${CYAN}--- Info: Empfehlungen für die Anzahl der Trials (Zeitschätzungen sind sehr grob!) ---${NC}"
+printf "+-------------+------------------------+-------------------------+--------------------------+\n"
+printf "| Zeitfenster | ${YELLOW}Schnell (ca. Zeit)${NC}     | ${GREEN}Empfohlen (ca. Zeit)${NC}    | ${CYAN}Gründlich (ca. Zeit)${NC}   |\n"
+printf "+-------------+------------------------+-------------------------+--------------------------+\n"
+printf "| 5m, 15m     | 100 Trials (< 30 Min)  | 300 Trials (ca. 1-2h)   | 500 Trials (ca. 2-4h)    |\n"
+printf "| 30m, 1h     | 100 Trials (< 15 Min)  | 500 Trials (ca. 1-1.5h) | 750 Trials (ca. 1.5-3h)  |\n"
+printf "| 2h, 4h      | 100 Trials (< 5 Min)   | 500 Trials (ca. 20-45m) | 1000 Trials (ca. 45-90m) |\n"
+printf "| 6h, 1d      | 100 Trials (< 2 Min)   | 750 Trials (ca. 15-30m) | 1500 Trials (ca. 30-60m) |\n"
+printf "+-------------+------------------------+-------------------------+--------------------------+\n"
 
 read -p "Anzahl der Optimierungs-Versuche (Trials) [Vorschlag: ${DEFAULT_TRIALS}]: " INPUT_TRIALS
 TRIALS="${INPUT_TRIALS:-$DEFAULT_TRIALS}"
