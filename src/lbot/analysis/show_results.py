@@ -22,13 +22,18 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
 
     # Lade Daten
     dummy_exchange = Exchange({'apiKey': 'dummy', 'secret': 'dummy'})
+    ema_period = settings.get('strategy_filters', {}).get('ema_period', 200)
     data_raw = get_market_data(dummy_exchange, symbol, timeframe, start_date)
-    data_for_backtest = data_raw[start_date:end_date]
-    if data_for_backtest.empty:
-        print(f"Konnte keine Daten für {symbol} im Zeitraum {start_date}-{end_date} laden. Überspringe.")
+    
+    # Filtere Daten auf den vom Benutzer gewählten Zeitraum
+    data_for_backtest = data_raw.loc[start_date:end_date]
+    
+    sequence_length = settings.get('model_settings', {}).get('sequence_length', 24)
+    if data_for_backtest.empty or len(data_for_backtest) < sequence_length:
+        print(f"Konnte nicht genügend Daten für {symbol} im Zeitraum {start_date}-{end_date} laden. Überspringe.")
         return None
 
-    data_with_features = create_ann_features(data_for_backtest[['open', 'high', 'low', 'close', 'volume']])
+    data_with_features = create_ann_features(data_for_backtest[['open', 'high', 'low', 'close', 'volume']], ema_period=ema_period)
     
     # Lade Modell
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
@@ -40,16 +45,14 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
         return None
 
     # Führe Backtest aus
-    backtest_settings = settings.get('backtest_settings', {})
+    # Dies ist der korrigierte Aufruf, der keine unerwarteten Argumente mehr übergibt
     backtester = Backtester(
         data=data_with_features.copy(),
         model=model,
         scaler=scaler,
         params=config,
-        start_capital=start_capital,
-        sequence_length=settings['model_settings']['sequence_length'],
-        fee_rate_pct=backtest_settings.get('fee_rate_pct', 0.06),
-        slippage_pct=backtest_settings.get('slippage_pct', 0.02)
+        settings=settings,
+        start_capital=start_capital
     )
     result = backtester.run()
     
@@ -68,8 +71,10 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
 def main():
     print("--- L-Bot Ergebnis-Analyse ---")
     
-    # Lade globale Einstellungen
     settings_path = os.path.join(PROJECT_ROOT, 'settings.json')
+    if not os.path.exists(settings_path):
+        print(f"Fehler: settings.json nicht gefunden unter {settings_path}")
+        return
     with open(settings_path, 'r') as f:
         settings = json.load(f)
 
@@ -99,6 +104,7 @@ def main():
         return
 
     all_results = []
+    # Gehe durch alle gefundenen Konfigurationsdateien
     for filename in os.listdir(configs_dir):
         if filename.startswith('config_') and filename.endswith('.json'):
             config_path = os.path.join(configs_dir, filename)
@@ -119,6 +125,7 @@ def main():
 
     print("\n\n=======================================================")
     print(f"     Zusammenfassung (Startkapital: {start_capital} USDT)")
+    print(f"     Zeitraum: {start_date} bis {end_date}")
     print("=======================================================")
     pd.set_option('display.float_format', '{:.2f}'.format)
     print(results_df.to_string(index=False))
