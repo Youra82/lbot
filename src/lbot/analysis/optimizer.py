@@ -6,7 +6,7 @@ import json
 import pandas as pd
 import optuna
 import logging
-import optuna
+import time 
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -21,21 +21,50 @@ from lbot.analysis.backtester import Backtester
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# MODIFIZIERT: Die Funktion akzeptiert jetzt 'n_trials' als Argument
-def progress_callback(study, trial, n_trials):
-    """Gibt eine Statusmeldung in einer einzigen, sich aktualisierenden Zeile aus."""
-    best_value_str = "N/A"
-    if study.best_value is not None:
-        best_value_str = f"{study.best_value:.2f}"
+# Eine Klasse für unseren intelligenten Callback, der den Benchmark durchführt
+class BenchmarkCallback:
+    def __init__(self, n_trials, n_jobs):
+        self.n_trials = n_trials
+        self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
+        self.start_time = None
+        self.warmup_trials = 2 # Die ersten Trials sind zum "Aufwärmen"
+
+    def __call__(self, study, trial):
+        # Beim ersten Aufruf die Startzeit speichern
+        if self.start_time is None:
+            self.start_time = time.time()
+        
+        eta_str = "berechne..."
+        # Nur nach der Aufwärmphase mit der ETA-Berechnung beginnen
+        if trial.number >= self.warmup_trials:
+            now = time.time()
+            elapsed_seconds = now - self.start_time
+            avg_time_per_trial = elapsed_seconds / (trial.number + 1)
+            remaining_trials = self.n_trials - (trial.number + 1)
             
-    message = f"    - Optimierung läuft: Trial {trial.number + 1}/{n_trials} | Bester Score bisher: {best_value_str}"
-    
-    sys.stdout.write('\r' + message.ljust(80))
-    sys.stdout.flush()
-    
-    if (trial.number + 1) == n_trials:
-        sys.stdout.write('\n')
+            # ETA in Sekunden berechnen (geteilt durch Anzahl der Jobs)
+            if self.n_jobs > 1:
+                # Bei paralleler Ausführung wird die Zeit pro "Welle" an Jobs berechnet
+                eta_seconds = int(avg_time_per_trial * remaining_trials / self.n_jobs)
+            else:
+                eta_seconds = int(avg_time_per_trial * remaining_trials)
+
+            # ETA in Minuten und Sekunden umrechnen
+            eta_minutes, eta_sec = divmod(eta_seconds, 60)
+            eta_str = f"ca. {eta_minutes}m {eta_sec}s"
+
+        best_value_str = "N/A"
+        if study.best_value is not None:
+            best_value_str = f"{study.best_value:.2f}"
+            
+        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | ETA: {eta_str} | Bester Score: {best_value_str}"
+        
+        sys.stdout.write('\r' + message.ljust(90))
         sys.stdout.flush()
+        
+        if (trial.number + 1) == self.n_trials:
+            sys.stdout.write('\n')
+            sys.stdout.flush()
 
 
 DATA = None
@@ -93,12 +122,15 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
 
     study = optuna.create_study(direction="maximize")
     
-    # MODIFIZIERT: Wir übergeben die 'trials'-Anzahl über eine Lambda-Funktion an den Callback
+    # Wir erstellen eine Instanz unseres neuen Benchmark-Callbacks
+    benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
+    
+    # und übergeben sie an den optimize-Aufruf
     study.optimize(
         objective,
         n_trials=trials,
         n_jobs=jobs,
-        callbacks=[lambda s, t: progress_callback(s, t, trials)]
+        callbacks=[benchmark_callback]
     )
     
     if not study.best_trial:
@@ -161,7 +193,7 @@ def main():
         for timeframe in timeframes:
             job_count += 1
             logging.info(f"--- Paket {job_count}/{total_jobs}: Start für {symbol} ({timeframe}) ---")
-            result = run_optimization_for_pair(symbol, timeframe, args.start_date, args.trials, args.jobs)
+            result = run_optimization_for_pair(symbol, timeframe, args.start_date, args.trials, int(args.jobs))
             if result:
                 all_results.append(result)
 
