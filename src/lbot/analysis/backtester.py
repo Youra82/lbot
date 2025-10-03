@@ -14,11 +14,11 @@ class Backtester:
         self.settings = settings
         self.start_capital = start_capital
         
-        model_conf = self.settings['model_settings']
-        backtest_conf = self.settings['backtest_settings']
+        model_conf = self.settings.get('model_settings', {})
+        backtest_conf = self.settings.get('backtest_settings', {})
         self.filter_conf = self.settings.get('strategy_filters', {})
         
-        self.sequence_length = model_conf['sequence_length']
+        self.sequence_length = model_conf.get('sequence_length', 24)
         self.fee_rate = backtest_conf.get('fee_rate_pct', 0.06) / 100
         self.slippage = backtest_conf.get('slippage_pct', 0.02) / 100
         
@@ -33,40 +33,56 @@ class Backtester:
     def _is_trend_filter_ok(self, index, side):
         if not self.filter_conf.get('use_trend_filter', False):
             return True
-
         ema_period = self.filter_conf.get('ema_period', 200)
         ema_col = f'ema_{ema_period}'
-        
-        if ema_col not in self.data.columns:
-            return True
-
+        if ema_col not in self.data.columns: return True
         current_price = self.data['close'].iloc[index]
         ema_value = self.data[ema_col].iloc[index]
-        
-        if side == 'long':
-            return current_price > ema_value
-        elif side == 'short':
-            return current_price < ema_value
+        if side == 'long': return current_price > ema_value
         return False
+
+    # NEU: Funktion für den Volatilitäts-Filter
+    def _is_volatility_filter_ok(self, index):
+        if not self.filter_conf.get('use_volatility_filter', False):
+            return True
+        
+        atr_period = self.filter_conf.get('atr_period', 14)
+        natr_col = f'natr_{atr_period}'
+        
+        if natr_col not in self.data.columns: return True
+            
+        min_natr = self.params['strategy'].get('min_natr', 0)
+        max_natr = self.params['strategy'].get('max_natr', 999)
+        
+        current_natr = self.data[natr_col].iloc[index]
+        
+        return min_natr <= current_natr <= max_natr
+
 
     def run(self):
         ema_period = self.filter_conf.get('ema_period', 200)
-        ema_col_name = f'ema_{ema_period}'
+        atr_period = self.filter_conf.get('atr_period', 14)
         
-        feature_columns_to_scale = self.data.columns.drop(['close', ema_col_name], errors='ignore')
+        # Features, die nicht skaliert werden sollen
+        cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
+        feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
         
         scaled_features_df = self.data.copy()
-        scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
+        try:
+            scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
+        except Exception as e:
+            logging.error(f"Fehler bei der Skalierung im Backtester: {e}")
+            return self._calculate_metrics()
         
         position = None
         entry_price = 0
         
-        model_input_feature_names = scaled_features_df.drop(['close', ema_col_name], errors='ignore').columns
+        model_input_feature_names = self.scaler.get_feature_names_out()
 
         for i in range(self.sequence_length, len(scaled_features_df)):
-            current_price = self.data['close'].iloc[i]
-            
             if position:
+                # ... (Logik zum Schließen der Position bleibt unverändert) ...
+                current_price = self.data['close'].iloc[i]
                 pnl_pct = (current_price - entry_price) / entry_price
                 if position == 'long':
                     if pnl_pct <= -self.sl_pct:
@@ -82,26 +98,27 @@ class Backtester:
                 input_data = np.expand_dims(model_input_values, axis=0)
                 
                 prediction = self.model.predict(input_data, verbose=0)[0][0]
-                
                 pred_threshold = self.params['strategy']['prediction_threshold']
                 
+                # MODIFIZIERT: Alle Filter werden jetzt hier angewendet
                 if (prediction >= pred_threshold and 
-                    self.params['behavior']['use_longs'] and 
-                    self._is_trend_filter_ok(i, 'long')):
+                    self.params['behavior'].get('use_longs', False) and 
+                    self._is_trend_filter_ok(i, 'long') and
+                    self._is_volatility_filter_ok(i)):
                     
                     position = 'long'
+                    # ... (Rest der Logik zur Trade-Eröffnung bleibt unverändert) ...
                     leverage = self.params['risk']['leverage']
                     risk_per_trade = self.params['risk']['risk_per_trade_pct'] / 100
                     rr_ratio = self.params['risk']['risk_reward_ratio']
-                    
                     self.sl_pct = risk_per_trade / leverage
                     self.tp_pct = self.sl_pct * rr_ratio
-                    
                     self._open_position(i, 'long')
                     entry_price = self.trades[-1]['entry_price']
 
         return self._calculate_metrics()
-
+    
+    # ... (Restliche Funktionen _open_position, _close_position, _calculate_metrics bleiben unverändert) ...
     def _open_position(self, index, side):
         raw_price = self.data['close'].iloc[index]
         entry_price_with_slippage = self._apply_slippage(raw_price, side)
@@ -115,34 +132,38 @@ class Backtester:
         })
 
     def _close_position(self, index, reason):
-        trade = self.trades[-1]
-        if trade['status'] != 'open': return
+        trade_to_close = next((t for t in reversed(self.trades) if t['status'] == 'open'), None)
+        if not trade_to_close: return
+        
         raw_price = self.data['close'].iloc[index]
         exit_price_with_slippage = self._apply_slippage(raw_price, 'short')
-        trade['status'] = 'closed'
-        trade['exit_index'] = index
-        trade['exit_date'] = self.data.index[index]
-        trade['exit_price'] = exit_price_with_slippage
-        trade['reason'] = reason
-        entry_price = trade['entry_price']
-        exit_price = trade['exit_price']
+        
+        trade_to_close['status'] = 'closed'
+        trade_to_close['exit_index'] = index
+        trade_to_close['exit_date'] = self.data.index[index]
+        trade_to_close['exit_price'] = exit_price_with_slippage
+        trade_to_close['reason'] = reason
+        
+        entry_price = trade_to_close['entry_price']
+        exit_price = trade_to_close['exit_price']
         pnl_pct = (exit_price - entry_price) / entry_price
+        
         leverage = self.params['risk']['leverage']
         capital = self.equity_curve[-1]
+        
         entry_cost = capital * leverage * self.fee_rate
         exit_cost = capital * leverage * (1 + pnl_pct) * self.fee_rate
         total_fees = entry_cost + exit_cost
+        
         pnl_amount = (capital * pnl_pct * leverage) - total_fees
         self.equity_curve.append(capital + pnl_amount)
 
     def _calculate_metrics(self):
-        # FINALE KORREKTUR: Prüfen, ob überhaupt Trades gemacht wurden
         if not self.trades:
             return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
             
         df_trades = pd.DataFrame(self.trades)
         
-        # Sicherheitsabfrage, falls aus irgendeinem Grund kein Trade geschlossen wurde
         if 'status' not in df_trades.columns or df_trades[df_trades['status'] == 'closed'].empty:
              return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
 
@@ -152,10 +173,12 @@ class Backtester:
         final_equity = self.equity_curve[-1]
         total_pnl_pct = (final_equity / self.start_capital - 1) * 100
         win_rate = (pnl > 0).mean() * 100 if not pnl.empty else 0
+        
         equity_series = pd.Series(self.equity_curve)
         peak = equity_series.expanding(min_periods=1).max()
         drawdown = (equity_series - peak) / peak
-        max_drawdown_pct = abs(drawdown.min() * 100) if not drawdown.empty else 0
+        max_drawdown_pct = abs(drawdown.min() * 100) if not drawdown.empty and not drawdown.isnull().all() else 0
+        
         return {
             'total_pnl_pct': total_pnl_pct,
             'win_rate': win_rate,
