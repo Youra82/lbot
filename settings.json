@@ -2,6 +2,7 @@
     "model_settings": {
         "sequence_length": 24,
         "future_steps": 5,
+        "mc_dropout_samples": 30,
         "epochs": 50,
         "batch_size": 32,
         "validation_split": 0.1
@@ -23,27 +24,17 @@
     },
     "optimization_settings": {
         "enabled": true,
-        "symbols_to_optimize": [
-            "BTC",
-            "ETH",
-            "SOL",
-            "XRP",
-            "DOGE"
-        ],
-        "timeframes_to_optimize": [
-            "4h",
-            "6h",
-            "1d"
-        ],
-        "lookback_days": 120,
+        "symbols_to_optimize": ["BTC", "ETH"],
+        "timeframes_to_optimize": ["4h"],
+        "lookback_days": 730,
         "start_capital": 1000,
         "cpu_cores": -1,
         "num_trials": 500,
         "auto_clear_cache_days": 30,
         "constraints": {
-            "max_drawdown_pct": 25,
+            "max_drawdown_pct": 30,
             "min_win_rate_pct": 40,
-            "min_pnl_pct": 50
+            "min_pnl_pct": 0
         }
     }
 }
