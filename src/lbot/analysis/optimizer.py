@@ -6,7 +6,8 @@ import json
 import pandas as pd
 import optuna
 import logging
-import time 
+import time
+from collections import deque # NEU: Import für den gleitenden Durchschnitt
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -21,30 +22,32 @@ from lbot.analysis.backtester import Backtester
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 
-# Eine Klasse für unseren intelligenten Callback, der den Benchmark durchführt
+# VERBESSERTE CALLBACK-KLASSE mit gleitendem Durchschnitt für die ETA
 class BenchmarkCallback:
     def __init__(self, n_trials, n_jobs):
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
-        self.start_time = None
-        self.warmup_trials = 2
+        # NEU: Wir speichern die letzten 20 Trial-Zeiten
+        self.trial_durations = deque(maxlen=20) 
+        self.last_time = None
 
-    # NEU: Kleine Hilfsfunktion, um Sekunden schön zu formatieren
     def _format_seconds(self, seconds: int) -> str:
         minutes, sec = divmod(seconds, 60)
         return f"{minutes}m {sec}s"
 
     def __call__(self, study, trial):
-        if self.start_time is None:
-            self.start_time = time.time()
-        
         now = time.time()
-        elapsed_seconds = now - self.start_time
-        elapsed_str = self._format_seconds(int(elapsed_seconds))
+        # Zeitmessung für den einzelnen Trial
+        if self.last_time is not None:
+            duration = now - self.last_time
+            self.trial_durations.append(duration)
+        self.last_time = now
 
         eta_str = "berechne..."
-        if trial.number >= self.warmup_trials:
-            avg_time_per_trial = elapsed_seconds / (trial.number + 1)
+        # Beginne mit der Schätzung, nachdem wir ein paar Messungen haben
+        if len(self.trial_durations) > 5:
+            # NEU: Nutze den Durchschnitt der letzten Messungen
+            avg_time_per_trial = sum(self.trial_durations) / len(self.trial_durations)
             remaining_trials = self.n_trials - (trial.number + 1)
             
             eta_seconds = 0
@@ -58,10 +61,15 @@ class BenchmarkCallback:
         if study.best_value is not None:
             best_value_str = f"{study.best_value:.2f}"
             
-        # MODIFIZIERT: 'Laufzeit' zur Nachricht hinzugefügt
-        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | Laufzeit: {elapsed_str} | ETA: {eta_str} | Bester Score: {best_value_str}"
+        # Gesamtlaufzeit seit dem ersten Trial berechnen
+        total_elapsed_str = ""
+        if 'start_time' in study.user_attrs:
+             total_elapsed_seconds = int(now - study.user_attrs['start_time'])
+             total_elapsed_str = f"Laufzeit: {self._format_seconds(total_elapsed_seconds)} | "
+
+        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | {total_elapsed_str}ETA: {eta_str} | Bester Score: {best_value_str}"
         
-        sys.stdout.write('\r' + message.ljust(90))
+        sys.stdout.write('\r' + message.ljust(100))
         sys.stdout.flush()
         
         if (trial.number + 1) == self.n_trials:
@@ -123,6 +131,9 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         return None
 
     study = optuna.create_study(direction="maximize")
+    
+    # NEU: Wir speichern die Startzeit im Study-Objekt, damit der Callback sie nutzen kann
+    study.set_user_attr('start_time', time.time())
     
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
     
