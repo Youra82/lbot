@@ -35,6 +35,8 @@ def train_for_symbol(symbol, timeframe, start_date, settings):
 
     data_with_features = create_ann_features(data)
     
+    # Die Spalten, die nicht skaliert werden, sind jetzt fest definiert im lstm_model.py
+    # daher müssen wir hier flexibler sein.
     cols_to_drop_for_scaling = [col for col in data_with_features.columns if 'ema_' in col or 'atr_' in col]
     cols_to_drop_for_scaling.append('close')
     feature_columns_to_scale = data_with_features.columns.drop(cols_to_drop_for_scaling, errors='ignore')
