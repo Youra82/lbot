@@ -1,19 +1,23 @@
 # src/lbot/analysis/optimizer.py
-# ... (alle Imports und der BenchmarkCallback bleiben gleich) ...
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+
 import sys, argparse, json, pandas as pd, optuna, logging, time
 from collections import deque
 optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
+
 from lbot.utils.exchange import Exchange
 from lbot.utils.lstm_model import create_ann_features, load_model_and_scaler
 from lbot.utils.data_handler import get_market_data
 from lbot.analysis.backtester import Backtester
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class BenchmarkCallback:
-    # ... (unverändert) ...
+    # ... (Diese Klasse bleibt unverändert) ...
     def __init__(self, n_trials, n_jobs):
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
@@ -61,7 +65,6 @@ def load_settings():
     with open(os.path.join(PROJECT_ROOT, 'settings.json'), 'r') as f:
         return json.load(f)
 
-# MODIFIZIERT: Objective-Funktion für Regression
 def objective(trial):
     try:
         ema_period = trial.suggest_int("ema_period", 50, 400, step=10)
@@ -71,8 +74,9 @@ def objective(trial):
         
         params = {
             "strategy": {
-                # NEU: Schwellenwert für die vorhergesagte prozentuale Steigerung
                 "entry_threshold_pct": trial.suggest_float("entry_threshold_pct", 0.5, 3.0),
+                # NEU: Optuna findet den besten Schwellenwert für die Unsicherheit
+                "uncertainty_threshold": trial.suggest_float("uncertainty_threshold", 0.001, 0.02),
                 "min_natr": trial.suggest_float("min_natr", 0.2, 1.5),
                 "max_natr": trial.suggest_float("max_natr", 1.5, 8.0)
             },
@@ -93,7 +97,8 @@ def objective(trial):
         metrics = backtester.run()
 
         max_drawdown_constraint = opti_settings.get('constraints', {}).get('max_drawdown_pct', 30)
-        if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 10:
+        # Wir bestrafen auch, wenn zu wenige Trades gemacht werden (z.B. < 20 Trades in 2 Jahren)
+        if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 20:
             return -999.0
             
         score = metrics['total_pnl_pct'] * (metrics.get('win_rate', 0) / 100) / (metrics['max_drawdown_pct'] + 1)
@@ -101,7 +106,6 @@ def objective(trial):
     except Exception:
         return -999.0
 
-# MODIFIZIERT: run_optimization_for_pair speichert jetzt den 'entry_threshold_pct'
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     global RAW_DATA, MODEL, SCALER
     logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
@@ -111,7 +115,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     
     RAW_DATA = get_market_data(exchange, symbol, timeframe, start_date)
     if RAW_DATA.empty or len(RAW_DATA) < 400:
-        logging.warning(f"Nicht genug Rohdaten für {symbol} ({len(RAW_DATA)} Kerzen). Überspringe.")
+        logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe.")
         return None
     
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
@@ -141,6 +145,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         "market": {"symbol": symbol, "timeframe": timeframe},
         "strategy": {
             "entry_threshold_pct": best_params_dict['entry_threshold_pct'],
+            "uncertainty_threshold": best_params_dict['uncertainty_threshold'],
             "min_natr": best_params_dict['min_natr'],
             "max_natr": best_params_dict['max_natr']
         },
@@ -156,17 +161,18 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         }
     }
     
-    # ... (Rest der Funktion zum Speichern und finalen Backtest bleibt unverändert) ...
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
     with open(config_path, 'w') as f:
         json.dump(final_config, f, indent=4)
     logging.info(f"Beste Konfiguration gespeichert in: {config_path}")
+
     final_features = create_ann_features(RAW_DATA.copy(), ema_period=best_params_dict['ema_period'], atr_period=best_params_dict['atr_period'])
     opti_settings = SETTINGS.get('optimization_settings', {})
     final_backtester = Backtester(data=final_features, model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     final_metrics = final_backtester.run()
+
     return {"symbol": symbol, "timeframe": timeframe, "score": best_score, "params": final_config, "metrics": final_metrics}
 
 def main():
