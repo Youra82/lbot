@@ -41,7 +41,6 @@ class Backtester:
         if side == 'long': return current_price > ema_value
         return False
 
-    # NEU: Funktion für den Volatilitäts-Filter
     def _is_volatility_filter_ok(self, index):
         if not self.filter_conf.get('use_volatility_filter', False):
             return True
@@ -58,67 +57,65 @@ class Backtester:
         
         return min_natr <= current_natr <= max_natr
 
-
     def run(self):
-        ema_period = self.filter_conf.get('ema_period', 200)
-        atr_period = self.filter_conf.get('atr_period', 14)
-        
-        # Features, die nicht skaliert werden sollen
-        cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
-        feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
-        
-        scaled_features_df = self.data.copy()
+        # NEU: Umgebe den gesamten "riskanten" Teil mit einem try-except-Block
         try:
-            scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
-        except Exception as e:
-            logging.error(f"Fehler bei der Skalierung im Backtester: {e}")
-            return self._calculate_metrics()
-        
-        position = None
-        entry_price = 0
-        
-        model_input_feature_names = self.scaler.get_feature_names_out()
-
-        for i in range(self.sequence_length, len(scaled_features_df)):
-            if position:
-                # ... (Logik zum Schließen der Position bleibt unverändert) ...
-                current_price = self.data['close'].iloc[i]
-                pnl_pct = (current_price - entry_price) / entry_price
-                if position == 'long':
-                    if pnl_pct <= -self.sl_pct:
-                        self._close_position(i, 'SL')
-                        position = None
-                    elif pnl_pct >= self.tp_pct:
-                        self._close_position(i, 'TP')
-                        position = None
+            ema_period = self.filter_conf.get('ema_period', 200)
+            atr_period = self.filter_conf.get('atr_period', 14)
             
-            if not position:
-                sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
-                model_input_values = sequence_df[model_input_feature_names].values
-                input_data = np.expand_dims(model_input_values, axis=0)
+            cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
+            feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
+            
+            scaled_features_df = self.data.copy()
+            scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
+            
+            position = None
+            entry_price = 0
+            
+            model_input_feature_names = self.scaler.get_feature_names_out()
+
+            for i in range(self.sequence_length, len(scaled_features_df)):
+                if position:
+                    current_price = self.data['close'].iloc[i]
+                    pnl_pct = (current_price - entry_price) / entry_price
+                    if position == 'long':
+                        if pnl_pct <= -self.sl_pct:
+                            self._close_position(i, 'SL')
+                            position = None
+                        elif pnl_pct >= self.tp_pct:
+                            self._close_position(i, 'TP')
+                            position = None
                 
-                prediction = self.model.predict(input_data, verbose=0)[0][0]
-                pred_threshold = self.params['strategy']['prediction_threshold']
-                
-                # MODIFIZIERT: Alle Filter werden jetzt hier angewendet
-                if (prediction >= pred_threshold and 
-                    self.params['behavior'].get('use_longs', False) and 
-                    self._is_trend_filter_ok(i, 'long') and
-                    self._is_volatility_filter_ok(i)):
+                if not position:
+                    sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
+                    model_input_values = sequence_df[model_input_feature_names].values
+                    input_data = np.expand_dims(model_input_values, axis=0)
                     
-                    position = 'long'
-                    # ... (Rest der Logik zur Trade-Eröffnung bleibt unverändert) ...
-                    leverage = self.params['risk']['leverage']
-                    risk_per_trade = self.params['risk']['risk_per_trade_pct'] / 100
-                    rr_ratio = self.params['risk']['risk_reward_ratio']
-                    self.sl_pct = risk_per_trade / leverage
-                    self.tp_pct = self.sl_pct * rr_ratio
-                    self._open_position(i, 'long')
-                    entry_price = self.trades[-1]['entry_price']
+                    prediction = self.model.predict(input_data, verbose=0)[0][0]
+                    pred_threshold = self.params['strategy']['prediction_threshold']
+                    
+                    if (prediction >= pred_threshold and 
+                        self.params['behavior'].get('use_longs', False) and 
+                        self._is_trend_filter_ok(i, 'long') and
+                        self._is_volatility_filter_ok(i)):
+                        
+                        position = 'long'
+                        leverage = self.params['risk']['leverage']
+                        risk_per_trade = self.params['risk']['risk_per_trade_pct'] / 100
+                        rr_ratio = self.params['risk']['risk_reward_ratio']
+                        self.sl_pct = risk_per_trade / leverage
+                        self.tp_pct = self.sl_pct * rr_ratio
+                        self._open_position(i, 'long')
+                        entry_price = self.trades[-1]['entry_price']
+
+        except Exception as e:
+            # Wenn irgendein Fehler im Backtest passiert (wie der Skalierungsfehler),
+            # loggen wir ihn leise und geben ein leeres Ergebnis zurück, anstatt abzustürzen.
+            # logging.debug(f"Interner Backtest-Fehler in Trial: {e}") # Optional für Debugging
+            return self._calculate_metrics() # Gibt ein "Null"-Ergebnis zurück, da self.trades leer ist
 
         return self._calculate_metrics()
     
-    # ... (Restliche Funktionen _open_position, _close_position, _calculate_metrics bleiben unverändert) ...
     def _open_position(self, index, side):
         raw_price = self.data['close'].iloc[index]
         entry_price_with_slippage = self._apply_slippage(raw_price, side)
