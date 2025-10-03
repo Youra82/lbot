@@ -2,152 +2,98 @@
 import pandas as pd
 import numpy as np
 import logging
-from ..utils.mc_dropout_predictor import make_mc_prediction
-# KORRIGIERT: Importiere die Konstanten aus lstm_model
+# Entferne den MC-Dropout-Import, da wir ihn nicht mehr verwenden
+# from ..utils.mc_dropout_predictor import make_mc_prediction 
 from ..utils.lstm_model import EMA_LONG_PERIOD, ATR_PERIOD
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Backtester:
     def __init__(self, data, model, scaler, params, settings, start_capital=1000):
-        self.data = data
-        self.model = model
-        self.scaler = scaler
-        self.params = params
-        self.settings = settings
-        self.start_capital = start_capital
-        
-        model_conf = self.settings.get('model_settings', {})
-        backtest_conf = self.settings.get('backtest_settings', {})
-        self.filter_conf = self.settings.get('strategy_filters', {})
-        
-        self.sequence_length = model_conf.get('sequence_length', 24)
-        self.fee_rate = backtest_conf.get('fee_rate_pct', 0.06) / 100
-        self.slippage = backtest_conf.get('slippage_pct', 0.02) / 100
-        
-        self.trades = []
-        self.equity_curve = [start_capital]
-
+        self.data = data; self.model = model; self.scaler = scaler; self.params = params; self.settings = settings; self.start_capital = start_capital
+        model_conf = self.settings.get('model_settings', {}); backtest_conf = self.settings.get('backtest_settings', {}); self.filter_conf = self.settings.get('strategy_filters', {})
+        self.sequence_length = model_conf.get('sequence_length', 24); self.fee_rate = backtest_conf.get('fee_rate_pct', 0.06) / 100; self.slippage = backtest_conf.get('slippage_pct', 0.02) / 100
+        self.trades = []; self.equity_curve = [start_capital]
     def _apply_slippage(self, price, side):
         if side == 'long': return price * (1 + self.slippage)
         elif side == 'short': return price * (1 - self.slippage)
         return price
-        
     def _is_trend_filter_ok(self, index, side):
         if not self.filter_conf.get('use_trend_filter', False): return True
-        ema_col = f'ema_{EMA_LONG_PERIOD}'
+        ema_col = f'ema_{EMA_LONG_PERIOD}'; 
         if ema_col not in self.data.columns: return True
-        current_price = self.data['close'].iloc[index]
-        ema_value = self.data[ema_col].iloc[index]
+        current_price = self.data['close'].iloc[index]; ema_value = self.data[ema_col].iloc[index]
         if side == 'long': return current_price > ema_value
         return False
-
     def _is_volatility_filter_ok(self, index):
         if not self.filter_conf.get('use_volatility_filter', False): return True
         natr_col = f'natr_{ATR_PERIOD}'
         if natr_col not in self.data.columns: return True
-        min_natr = self.params['strategy'].get('min_natr', 0)
-        max_natr = self.params['strategy'].get('max_natr', 999)
+        min_natr = self.params['strategy'].get('min_natr', 0); max_natr = self.params['strategy'].get('max_natr', 999)
         current_natr = self.data[natr_col].iloc[index]
         return min_natr <= current_natr <= max_natr
 
     def run(self):
         try:
-            mc_samples = self.settings.get('model_settings', {}).get('mc_dropout_samples', 30)
-
-            # KORREKTE REIHENFOLGE:
-            # 1. Definiere die Spalten, die das Modell erwartet
             model_feature_columns = ['rsi', 'adx', 'stoch_k', 'price_vs_ema_short', 'price_vs_ema_medium', 'rsi_vs_ema_rsi']
             features_to_scale = self.data[model_feature_columns]
-            
-            # 2. Skaliere nur diese Spalten
             scaled_feature_values = self.scaler.transform(features_to_scale)
             scaled_features_df = pd.DataFrame(scaled_feature_values, index=features_to_scale.index, columns=features_to_scale.columns)
-            
-            position = None
-            entry_price = 0
-
+            position = None; entry_price = 0
             for i in range(self.sequence_length, len(self.data)):
                 current_data_point_index = self.data.index[i]
-                
                 if position:
                     current_price = self.data['close'].loc[current_data_point_index]
                     pnl_pct = (current_price - entry_price) / entry_price
                     if position == 'long':
                         if pnl_pct <= -self.sl_pct: self._close_position(i, 'SL'); position = None
                         elif pnl_pct >= self.tp_pct: self._close_position(i, 'TP'); position = None
-                
                 if not position:
-                    # 3. Erstelle Sequenz aus den skalierten Daten
-                    start_index = i - self.sequence_length
-                    end_index = i
+                    start_index = i - self.sequence_length; end_index = i
                     sequence_indices = self.data.index[start_index:end_index]
-                    
-                    # Stelle sicher, dass die Sequenz im skalierten DataFrame vorhanden ist
-                    if not all(idx in scaled_features_df.index for idx in sequence_indices):
-                        continue
-                        
+                    if not all(idx in scaled_features_df.index for idx in sequence_indices): continue
                     sequence_data = scaled_features_df.loc[sequence_indices].values
                     input_data = np.expand_dims(sequence_data, axis=0)
                     
-                    mean_pred, std_pred = make_mc_prediction(self.model, input_data, n_samples=mc_samples)
+                    # ZURÜCK ZUR EINFACHEN VORHERSAGE
+                    prediction = self.model.predict(input_data, verbose=0)[0][0]
                     
                     entry_threshold_pct = self.params['strategy'].get('entry_threshold_pct', 1.0)
-                    uncertainty_threshold = self.params['strategy'].get('uncertainty_threshold', 0.01)
-                    predicted_pct_gain = mean_pred * 100
+                    predicted_pct_gain = prediction * 100
                     
                     if (predicted_pct_gain >= entry_threshold_pct and 
-                        std_pred <= uncertainty_threshold and
                         self.params['behavior'].get('use_longs', False) and 
                         self._is_trend_filter_ok(i, 'long') and
                         self._is_volatility_filter_ok(i)):
                         
-                        position = 'long'
-                        leverage = self.params['risk']['leverage']
-                        risk_per_trade = self.params['risk']['risk_per_trade_pct'] / 100
-                        rr_ratio = self.params['risk']['risk_reward_ratio']
-                        self.sl_pct = risk_per_trade / leverage
-                        self.tp_pct = self.sl_pct * rr_ratio
-                        self._open_position(i, 'long')
-                        entry_price = self.trades[-1]['entry_price']
-        except Exception as e:
-            # logging.error(f"Schwerer Fehler im Backtest-Lauf: {e}", exc_info=True)
+                        position = 'long'; leverage = self.params['risk']['leverage']; risk_per_trade = self.params['risk']['risk_per_trade_pct'] / 100
+                        rr_ratio = self.params['risk']['risk_reward_ratio']; self.sl_pct = risk_per_trade / leverage; self.tp_pct = self.sl_pct * rr_ratio
+                        self._open_position(i, 'long'); entry_price = self.trades[-1]['entry_price']
+        except Exception:
             return self._calculate_metrics()
-            
         return self._calculate_metrics()
-    
     def _open_position(self, index, side):
-        raw_price = self.data['close'].iloc[index]
-        entry_price_with_slippage = self._apply_slippage(raw_price, side)
+        raw_price = self.data['close'].iloc[index]; entry_price_with_slippage = self._apply_slippage(raw_price, side)
         self.trades.append({'entry_index': index, 'entry_date': self.data.index[index], 'entry_price': entry_price_with_slippage, 'side': side, 'status': 'open'})
-
     def _close_position(self, index, reason):
         trade_to_close = next((t for t in reversed(self.trades) if t['status'] == 'open'), None)
         if not trade_to_close: return
-        raw_price = self.data['close'].iloc[index]
-        exit_price_with_slippage = self._apply_slippage(raw_price, 'short')
+        raw_price = self.data['close'].iloc[index]; exit_price_with_slippage = self._apply_slippage(raw_price, 'short')
         trade_to_close.update({'status': 'closed', 'exit_index': index, 'exit_date': self.data.index[index], 'exit_price': exit_price_with_slippage, 'reason': reason})
-        entry_price = trade_to_close['entry_price']; exit_price = trade_to_close['exit_price']
-        pnl_pct = (exit_price - entry_price) / entry_price
-        leverage = self.params['risk']['leverage']
-        capital = self.equity_curve[-1]
-        entry_cost = capital * leverage * self.fee_rate
-        exit_cost = capital * leverage * (1 + pnl_pct) * self.fee_rate
-        total_fees = entry_cost + exit_cost
-        pnl_amount = (capital * pnl_pct * leverage) - total_fees
+        entry_price = trade_to_close['entry_price']; exit_price = trade_to_close['exit_price']; pnl_pct = (exit_price - entry_price) / entry_price
+        leverage = self.params['risk']['leverage']; capital = self.equity_curve[-1]
+        entry_cost = capital * leverage * self.fee_rate; exit_cost = capital * leverage * (1 + pnl_pct) * self.fee_rate
+        total_fees = entry_cost + exit_cost; pnl_amount = (capital * pnl_pct * leverage) - total_fees
         self.equity_curve.append(capital + pnl_amount)
-
     def _calculate_metrics(self):
         if not self.trades: return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
         df_trades = pd.DataFrame(self.trades)
         if 'status' not in df_trades.columns or df_trades[df_trades['status'] == 'closed'].empty: return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
         closed_trades = df_trades[df_trades['status'] == 'closed'].copy()
         pnl = (closed_trades['exit_price'] - closed_trades['entry_price']) / closed_trades['entry_price']
-        final_equity = self.equity_curve[-1]
-        total_pnl_pct = (final_equity / self.start_capital - 1) * 100
+        final_equity = self.equity_curve[-1]; total_pnl_pct = (final_equity / self.start_capital - 1) * 100
         win_rate = (pnl > 0).mean() * 100 if not pnl.empty else 0
-        equity_series = pd.Series(self.equity_curve)
-        peak = equity_series.expanding(min_periods=1).max()
+        equity_series = pd.Series(self.equity_curve); peak = equity_series.expanding(min_periods=1).max()
         drawdown = (equity_series - peak) / peak
         max_drawdown_pct = abs(drawdown.min() * 100) if not drawdown.empty and not drawdown.isnull().all() else 0
         return {'total_pnl_pct': total_pnl_pct, 'win_rate': win_rate, 'max_drawdown_pct': max_drawdown_pct, 'num_trades': len(closed_trades)}
