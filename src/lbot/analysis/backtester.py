@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import logging
 from ..utils.mc_dropout_predictor import make_mc_prediction
+# KORRIGIERT: Importiere die Konstanten aus lstm_model
+from ..utils.lstm_model import EMA_LONG_PERIOD, ATR_PERIOD
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -33,9 +35,7 @@ class Backtester:
         
     def _is_trend_filter_ok(self, index, side):
         if not self.filter_conf.get('use_trend_filter', False): return True
-        # Korrekt: Nutzt die dynamische Periode aus den Trial-Parametern
-        ema_period = self.params.get('filters', {}).get('ema_period', 200)
-        ema_col = f'ema_{ema_period}'
+        ema_col = f'ema_{EMA_LONG_PERIOD}'
         if ema_col not in self.data.columns: return True
         current_price = self.data['close'].iloc[index]
         ema_value = self.data[ema_col].iloc[index]
@@ -44,9 +44,7 @@ class Backtester:
 
     def _is_volatility_filter_ok(self, index):
         if not self.filter_conf.get('use_volatility_filter', False): return True
-        # Korrekt: Nutzt die dynamische Periode aus den Trial-Parametern
-        atr_period = self.params.get('filters', {}).get('atr_period', 14)
-        natr_col = f'natr_{atr_period}'
+        natr_col = f'natr_{ATR_PERIOD}'
         if natr_col not in self.data.columns: return True
         min_natr = self.params['strategy'].get('min_natr', 0)
         max_natr = self.params['strategy'].get('max_natr', 999)
@@ -55,44 +53,47 @@ class Backtester:
 
     def run(self):
         try:
-            # KORRIGIERT: Hole die dynamischen Perioden direkt aus den Trial-Parametern ('params')
-            filter_params = self.params.get('filters', {})
-            ema_period = filter_params.get('ema_period', self.filter_conf.get('ema_period', 200))
-            atr_period = filter_params.get('atr_period', self.filter_conf.get('atr_period', 14))
             mc_samples = self.settings.get('model_settings', {}).get('mc_dropout_samples', 30)
 
-            # KORRIGIERT: Verwende die dynamischen Perioden, um die korrekten Spaltennamen zu bilden
-            cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
-            feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
+            # KORREKTE REIHENFOLGE:
+            # 1. Definiere die Spalten, die das Modell erwartet
+            model_feature_columns = ['rsi', 'adx', 'stoch_k', 'price_vs_ema_short', 'price_vs_ema_medium', 'rsi_vs_ema_rsi']
+            features_to_scale = self.data[model_feature_columns]
             
-            scaled_features_df = self.data.copy()
-            scaled_features_df[feature_columns_to_scale] = self.scaler.transform(self.data[feature_columns_to_scale])
+            # 2. Skaliere nur diese Spalten
+            scaled_feature_values = self.scaler.transform(features_to_scale)
+            scaled_features_df = pd.DataFrame(scaled_feature_values, index=features_to_scale.index, columns=features_to_scale.columns)
             
             position = None
             entry_price = 0
-            
-            model_input_feature_names = self.scaler.get_feature_names_out()
 
-            for i in range(self.sequence_length, len(scaled_features_df)):
+            for i in range(self.sequence_length, len(self.data)):
+                current_data_point_index = self.data.index[i]
+                
                 if position:
-                    current_price = self.data['close'].iloc[i]
+                    current_price = self.data['close'].loc[current_data_point_index]
                     pnl_pct = (current_price - entry_price) / entry_price
                     if position == 'long':
                         if pnl_pct <= -self.sl_pct: self._close_position(i, 'SL'); position = None
                         elif pnl_pct >= self.tp_pct: self._close_position(i, 'TP'); position = None
                 
                 if not position:
-                    sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
+                    # 3. Erstelle Sequenz aus den skalierten Daten
+                    start_index = i - self.sequence_length
+                    end_index = i
+                    sequence_indices = self.data.index[start_index:end_index]
                     
-                    # Stelle sicher, dass nur die Spalten verwendet werden, auf die das Modell trainiert wurde
-                    model_input_values = sequence_df[model_input_feature_names].values
-                    input_data = np.expand_dims(model_input_values, axis=0)
+                    # Stelle sicher, dass die Sequenz im skalierten DataFrame vorhanden ist
+                    if not all(idx in scaled_features_df.index for idx in sequence_indices):
+                        continue
+                        
+                    sequence_data = scaled_features_df.loc[sequence_indices].values
+                    input_data = np.expand_dims(sequence_data, axis=0)
                     
                     mean_pred, std_pred = make_mc_prediction(self.model, input_data, n_samples=mc_samples)
                     
                     entry_threshold_pct = self.params['strategy'].get('entry_threshold_pct', 1.0)
                     uncertainty_threshold = self.params['strategy'].get('uncertainty_threshold', 0.01)
-                    
                     predicted_pct_gain = mean_pred * 100
                     
                     if (predicted_pct_gain >= entry_threshold_pct and 
@@ -110,10 +111,9 @@ class Backtester:
                         self._open_position(i, 'long')
                         entry_price = self.trades[-1]['entry_price']
         except Exception as e:
-            # Gib einen Hinweis auf den Fehler, damit wir ihn beim Debuggen sehen
-            # logging.warning(f"Interner Backtest-Fehler: {e}")
+            # logging.error(f"Schwerer Fehler im Backtest-Lauf: {e}", exc_info=True)
             return self._calculate_metrics()
-
+            
         return self._calculate_metrics()
     
     def _open_position(self, index, side):
