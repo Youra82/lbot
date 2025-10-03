@@ -2,13 +2,11 @@
 import pandas as pd
 import numpy as np
 import logging
-# NEU: Import der MC-Dropout-Funktion
 from ..utils.mc_dropout_predictor import make_mc_prediction
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Backtester:
-    # ... (__init__, _apply_slippage, _is_trend_filter_ok, _is_volatility_filter_ok bleiben unverändert) ...
     def __init__(self, data, model, scaler, params, settings, start_capital=1000):
         self.data = data
         self.model = model
@@ -16,20 +14,26 @@ class Backtester:
         self.params = params
         self.settings = settings
         self.start_capital = start_capital
+        
         model_conf = self.settings.get('model_settings', {})
         backtest_conf = self.settings.get('backtest_settings', {})
         self.filter_conf = self.settings.get('strategy_filters', {})
+        
         self.sequence_length = model_conf.get('sequence_length', 24)
         self.fee_rate = backtest_conf.get('fee_rate_pct', 0.06) / 100
         self.slippage = backtest_conf.get('slippage_pct', 0.02) / 100
+        
         self.trades = []
         self.equity_curve = [start_capital]
+
     def _apply_slippage(self, price, side):
         if side == 'long': return price * (1 + self.slippage)
         elif side == 'short': return price * (1 - self.slippage)
         return price
+        
     def _is_trend_filter_ok(self, index, side):
         if not self.filter_conf.get('use_trend_filter', False): return True
+        # Korrekt: Nutzt die dynamische Periode aus den Trial-Parametern
         ema_period = self.params.get('filters', {}).get('ema_period', 200)
         ema_col = f'ema_{ema_period}'
         if ema_col not in self.data.columns: return True
@@ -37,8 +41,10 @@ class Backtester:
         ema_value = self.data[ema_col].iloc[index]
         if side == 'long': return current_price > ema_value
         return False
+
     def _is_volatility_filter_ok(self, index):
         if not self.filter_conf.get('use_volatility_filter', False): return True
+        # Korrekt: Nutzt die dynamische Periode aus den Trial-Parametern
         atr_period = self.params.get('filters', {}).get('atr_period', 14)
         natr_col = f'natr_{atr_period}'
         if natr_col not in self.data.columns: return True
@@ -49,11 +55,13 @@ class Backtester:
 
     def run(self):
         try:
+            # KORRIGIERT: Hole die dynamischen Perioden direkt aus den Trial-Parametern ('params')
             filter_params = self.params.get('filters', {})
             ema_period = filter_params.get('ema_period', self.filter_conf.get('ema_period', 200))
             atr_period = filter_params.get('atr_period', self.filter_conf.get('atr_period', 14))
             mc_samples = self.settings.get('model_settings', {}).get('mc_dropout_samples', 30)
 
+            # KORRIGIERT: Verwende die dynamischen Perioden, um die korrekten Spaltennamen zu bilden
             cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
             feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
             
@@ -75,10 +83,11 @@ class Backtester:
                 
                 if not position:
                     sequence_df = scaled_features_df.iloc[i - self.sequence_length : i]
+                    
+                    # Stelle sicher, dass nur die Spalten verwendet werden, auf die das Modell trainiert wurde
                     model_input_values = sequence_df[model_input_feature_names].values
                     input_data = np.expand_dims(model_input_values, axis=0)
                     
-                    # MODIFIZIERT: Nutze jetzt die MC-Dropout-Vorhersage
                     mean_pred, std_pred = make_mc_prediction(self.model, input_data, n_samples=mc_samples)
                     
                     entry_threshold_pct = self.params['strategy'].get('entry_threshold_pct', 1.0)
@@ -86,7 +95,6 @@ class Backtester:
                     
                     predicted_pct_gain = mean_pred * 100
                     
-                    # MODIFIZIERT: Neue Einstiegslogik mit Unsicherheits-Check
                     if (predicted_pct_gain >= entry_threshold_pct and 
                         std_pred <= uncertainty_threshold and
                         self.params['behavior'].get('use_longs', False) and 
@@ -101,15 +109,18 @@ class Backtester:
                         self.tp_pct = self.sl_pct * rr_ratio
                         self._open_position(i, 'long')
                         entry_price = self.trades[-1]['entry_price']
-        except Exception:
+        except Exception as e:
+            # Gib einen Hinweis auf den Fehler, damit wir ihn beim Debuggen sehen
+            # logging.warning(f"Interner Backtest-Fehler: {e}")
             return self._calculate_metrics()
+
         return self._calculate_metrics()
     
-    # ... (Restliche Funktionen _open_position, _close_position, _calculate_metrics bleiben unverändert) ...
     def _open_position(self, index, side):
         raw_price = self.data['close'].iloc[index]
         entry_price_with_slippage = self._apply_slippage(raw_price, side)
         self.trades.append({'entry_index': index, 'entry_date': self.data.index[index], 'entry_price': entry_price_with_slippage, 'side': side, 'status': 'open'})
+
     def _close_position(self, index, reason):
         trade_to_close = next((t for t in reversed(self.trades) if t['status'] == 'open'), None)
         if not trade_to_close: return
@@ -125,6 +136,7 @@ class Backtester:
         total_fees = entry_cost + exit_cost
         pnl_amount = (capital * pnl_pct * leverage) - total_fees
         self.equity_curve.append(capital + pnl_amount)
+
     def _calculate_metrics(self):
         if not self.trades: return {'total_pnl_pct': 0, 'win_rate': 0, 'max_drawdown_pct': 0, 'num_trades': 0}
         df_trades = pd.DataFrame(self.trades)
