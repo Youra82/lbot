@@ -1,3 +1,4 @@
+cat << 'EOF' > src/lbot/utils/lstm_model.py
 # src/lbot/utils/lstm_model.py
 import pandas as pd
 import numpy as np
@@ -45,7 +46,6 @@ def create_ann_features(df_in):
     df.dropna(inplace=True)
     return df
 
-# ... (Rest der Datei bleibt unverändert) ...
 def create_sequences(data, sequence_length, future_steps):
     data['future_price'] = data['close'].shift(-future_steps)
     data['target'] = (data['future_price'] / data['close']) - 1
@@ -78,3 +78,4 @@ def load_model_and_scaler(model_path, scaler_path):
     except Exception as e:
         print(f"Fehler beim Laden von Modell/Scaler: {e}")
         return None, None
+EOF
