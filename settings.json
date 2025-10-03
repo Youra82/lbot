@@ -9,7 +9,9 @@
     },
     "strategy_filters": {
         "use_trend_filter": true,
-        "ema_period": 200
+        "ema_period": 200,
+        "use_volatility_filter": true,
+        "atr_period": 14
     },
     "backtest_settings": {
         "fee_rate_pct": 0.06,
@@ -18,24 +20,21 @@
     "live_trading_settings": {
         "use_auto_optimizer_results": false,
         "top_n_strategies_to_trade": 3,
-        "active_strategies": [
-            {
-                "symbol": "BTC/USDT:USDT",
-                "timeframe": "4h"
-            },
-            {
-                "symbol": "ETH/USDT:USDT",
-                "timeframe": "1d"
-            }
-        ]
+        "active_strategies": []
     },
     "optimization_settings": {
-        "enabled": false,
+        "enabled": true,
         "symbols_to_optimize": [
-            "BTC", "ETH", "SOL", "XRP", "DOGE"
+            "BTC",
+            "ETH",
+            "SOL",
+            "XRP",
+            "DOGE"
         ],
         "timeframes_to_optimize": [
-            "4h", "6h", "1d"
+            "4h",
+            "6h",
+            "1d"
         ],
         "lookback_days": 120,
         "start_capital": 1000,
@@ -45,7 +44,7 @@
         "constraints": {
             "max_drawdown_pct": 20,
             "min_win_rate_pct": 45,
-            "min_pnl_pct": 200
+            "min_pnl_pct": 100
         }
     }
 }
