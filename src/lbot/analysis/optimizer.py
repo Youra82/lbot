@@ -23,8 +23,8 @@ from lbot.analysis.backtester import Backtester
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
+
 class BenchmarkCallback:
-    # ... (Diese Klasse bleibt unverändert) ...
     def __init__(self, n_trials, n_jobs):
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
@@ -72,7 +72,8 @@ class BenchmarkCallback:
             sys.stdout.write('\n')
             sys.stdout.flush()
 
-DATA = None
+# Globale Variablen für Rohdaten und KI-Modell
+RAW_DATA = None
 MODEL = None
 SCALER = None
 SETTINGS = None
@@ -82,49 +83,65 @@ def load_settings():
         return json.load(f)
 
 def objective(trial):
-    # ... (Diese Funktion bleibt unverändert) ...
-    params = {
-        "strategy": {
-            "prediction_threshold": trial.suggest_float("prediction_threshold", 0.51, 0.85),
-            "min_natr": trial.suggest_float("min_natr", 0.1, 1.0),
-            "max_natr": trial.suggest_float("max_natr", 1.0, 5.0)
-        },
-        "risk": {
-            "risk_per_trade_pct": trial.suggest_float("risk_per_trade_pct", 0.5, 5.0),
-            "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 5.0),
-            "leverage": trial.suggest_int("leverage", 1, 20),
-            "margin_mode": "isolated"
-        },
-        "behavior": { "use_longs": True, "use_shorts": False }
-    }
-    if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]:
+    try:
+        # Filter-Parameter werden jetzt hier von Optuna vorgeschlagen
+        ema_period = trial.suggest_int("ema_period", 50, 400, step=10)
+        atr_period = trial.suggest_int("atr_period", 7, 28)
+
+        # Features werden für jeden Trial mit den dynamischen Parametern neu erstellt
+        data_with_features = create_ann_features(RAW_DATA.copy(), ema_period=ema_period, atr_period=atr_period)
+        
+        params = {
+            "strategy": {
+                "prediction_threshold": trial.suggest_float("prediction_threshold", 0.60, 0.90),
+                "min_natr": trial.suggest_float("min_natr", 0.2, 1.5),
+                "max_natr": trial.suggest_float("max_natr", 1.5, 8.0)
+            },
+            "risk": {
+                "risk_per_trade_pct": trial.suggest_float("risk_per_trade_pct", 0.5, 3.0),
+                "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 5.0),
+                "leverage": trial.suggest_int("leverage", 1, 10),
+            },
+            "behavior": { "use_longs": True, "use_shorts": False },
+            # Wir speichern die Filter-Perioden mit ab, um sie später zu verwenden
+            "filters": {
+                "ema_period": ema_period,
+                "atr_period": atr_period
+            }
+        }
+        
+        if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]:
+            return -999.0 # Ungültige Kombination, sofort verwerfen
+
+        opti_settings = SETTINGS.get('optimization_settings', {})
+        
+        # Der Backtester erhält die pro Trial erstellten Daten
+        backtester = Backtester(data=data_with_features, model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
+        metrics = backtester.run()
+
+        max_drawdown_constraint = opti_settings.get('constraints', {}).get('max_drawdown_pct', 30)
+        if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 10:
+            return -999.0
+            
+        # Optional: Score-Funktion anpassen, um die Win-Rate stärker zu gewichten
+        score = metrics['total_pnl_pct'] * (metrics.get('win_rate', 0) / 100) / (metrics['max_drawdown_pct'] + 1)
+        return score if not pd.isna(score) else -999.0
+    except Exception:
+        # Fängt alle unerwarteten Fehler in einem Trial ab
         return -999.0
-    opti_settings = SETTINGS.get('optimization_settings', {})
-    backtester = Backtester(data=DATA, model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
-    metrics = backtester.run()
-    max_drawdown_constraint = opti_settings.get('constraints', {}).get('max_drawdown_pct', 30)
-    if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 10:
-        return -999.0
-    score = metrics['total_pnl_pct'] / (metrics['max_drawdown_pct'] + 1)
-    return score if not pd.isna(score) else -999.0
 
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
-    global DATA, MODEL, SCALER
+    global RAW_DATA, MODEL, SCALER
     logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
     
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'}
     exchange = Exchange(dummy_account)
     
-    filter_conf = SETTINGS.get('strategy_filters', {})
-    ema_period = filter_conf.get('ema_period', 200)
-    atr_period = filter_conf.get('atr_period', 14)
-    
-    data_raw = get_market_data(exchange, symbol, timeframe, start_date)
-    if data_raw.empty:
-        logging.error(f"Keine Daten für {symbol}. Überspringe.")
+    # Wir laden nur noch die Rohdaten einmal pro Lauf
+    RAW_DATA = get_market_data(exchange, symbol, timeframe, start_date)
+    if RAW_DATA.empty or len(RAW_DATA) < 400: # Mindestanzahl für lange EMAs
+        logging.warning(f"Nicht genug Rohdaten für {symbol} ({len(RAW_DATA)} Kerzen). Überspringe.")
         return None
-        
-    DATA = create_ann_features(data_raw, ema_period=ema_period, atr_period=atr_period)
     
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
@@ -139,13 +156,12 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     study.set_user_attr('start_time', time.time())
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
     
-    # NEU: Wir sagen Optuna, dass es bei Fehlern in einem Trial nicht den ganzen Traceback ausgeben soll
     study.optimize(
         objective,
         n_trials=trials,
         n_jobs=jobs,
         callbacks=[benchmark_callback],
-        catch=(Exception,) # Fängt alle Fehler ab und lässt den Prozess weiterlaufen
+        catch=(Exception,)
     )
     
     if not study.best_trial or study.best_value <= 0:
@@ -167,9 +183,12 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
             "risk_per_trade_pct": best_params_dict['risk_per_trade_pct'],
             "risk_reward_ratio": best_params_dict['risk_reward_ratio'],
             "leverage": best_params_dict['leverage'],
-            "margin_mode": "isolated"
         },
-        "behavior": {"use_longs": True, "use_shorts": False}
+        "behavior": {"use_longs": True, "use_shorts": False},
+        "filters": {
+            "ema_period": best_params_dict['ema_period'],
+            "atr_period": best_params_dict['atr_period']
+        }
     }
     
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
@@ -179,8 +198,10 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         json.dump(final_config, f, indent=4)
     logging.info(f"Beste Konfiguration gespeichert in: {config_path}")
 
+    # Finaler Backtest zur Verifizierung
+    final_features = create_ann_features(RAW_DATA.copy(), ema_period=best_params_dict['ema_period'], atr_period=best_params_dict['atr_period'])
     opti_settings = SETTINGS.get('optimization_settings', {})
-    final_backtester = Backtester(data=DATA, model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
+    final_backtester = Backtester(data=final_features, model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     final_metrics = final_backtester.run()
 
     return {
@@ -192,7 +213,6 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     }
 
 def main():
-    # ... (Diese Funktion bleibt unverändert) ...
     global SETTINGS
     SETTINGS = load_settings()
     parser = argparse.ArgumentParser(description="L-Bot Parameter Optimizer")
@@ -202,7 +222,6 @@ def main():
     parser.add_argument('--trials', type=int, default=100)
     parser.add_argument('--jobs', type=int, default=-1)
     args = parser.parse_args()
-
     symbols = [s.upper() + "/USDT:USDT" for s in args.symbols.split()]
     timeframes = args.timeframes.split()
     
