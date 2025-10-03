@@ -1,4 +1,3 @@
-cat << 'EOF' > src/lbot/analysis/optimizer.py
 # src/lbot/analysis/optimizer.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
@@ -70,7 +69,7 @@ def objective(trial):
             "risk": { "risk_per_trade_pct": trial.suggest_float("risk_per_trade_pct", 0.5, 3.0), "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 5.0), "leverage": trial.suggest_int("leverage", 1, 10)},
             "behavior": { "use_longs": True, "use_shorts": False }
         }
-        
+
         if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]: return -999.0
 
         opti_settings = SETTINGS.get('optimization_settings', {})
@@ -88,7 +87,7 @@ def objective(trial):
         else: # "find_best"
             if metrics['max_drawdown_pct'] > 80 or metrics['num_trades'] < 5:
                 return -999.0
-            
+
         pnl = metrics['total_pnl_pct']
         drawdown = metrics['max_drawdown_pct']
         win_rate = metrics.get('win_rate', 0)
@@ -103,15 +102,15 @@ def objective(trial):
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     global DATA, MODEL, SCALER
     logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
-    
+
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy'}
     exchange = Exchange(dummy_account)
-    
+
     raw_data = get_market_data(exchange, symbol, timeframe, start_date)
     if raw_data.empty or len(raw_data) < 400:
         logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe.")
         return None
-        
+
     DATA = create_ann_features(raw_data)
 
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
@@ -126,9 +125,9 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     study = optuna.create_study(direction="maximize")
     study.set_user_attr('start_time', time.time())
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
-    
+
     study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[benchmark_callback], catch=(Exception,))
-    
+
     if not study.best_trial or study.best_value <= 0:
         logging.warning(f"Optuna fand keine profitable Lösung für {symbol} ({timeframe}).")
         return None
@@ -148,7 +147,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         "risk": { "risk_per_trade_pct": best_params_dict['risk_per_trade_pct'], "risk_reward_ratio": best_params_dict['risk_reward_ratio'], "leverage": best_params_dict['leverage']},
         "behavior": {"use_longs": True, "use_shorts": False}
     }
-    
+
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
@@ -192,4 +191,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-EOF
