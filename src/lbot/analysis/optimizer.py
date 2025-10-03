@@ -1,7 +1,5 @@
 # src/lbot/analysis/optimizer.py
 import os
-# NEU: Unterdrückt informative TensorFlow-Warnungen, die die Anzeige stören.
-# '2' bedeutet, dass nur noch Error-Meldungen von TensorFlow angezeigt werden.
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
 
 import sys
@@ -25,13 +23,11 @@ from lbot.analysis.backtester import Backtester
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-
-# VERBESSERTE CALLBACK-KLASSE mit gleitendem Durchschnitt für die ETA
 class BenchmarkCallback:
+    # ... (Diese Klasse bleibt unverändert) ...
     def __init__(self, n_trials, n_jobs):
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
-        # Wir speichern die letzten 20 Trial-Zeiten
         self.trial_durations = deque(maxlen=20) 
         self.last_time = None
 
@@ -41,16 +37,13 @@ class BenchmarkCallback:
 
     def __call__(self, study, trial):
         now = time.time()
-        # Zeitmessung für den einzelnen Trial
         if self.last_time is not None:
             duration = now - self.last_time
             self.trial_durations.append(duration)
         self.last_time = now
 
         eta_str = "berechne..."
-        # Beginne mit der Schätzung, nachdem wir ein paar Messungen haben
         if len(self.trial_durations) > 5:
-            # Nutze den Durchschnitt der letzten Messungen
             avg_time_per_trial = sum(self.trial_durations) / len(self.trial_durations)
             remaining_trials = self.n_trials - (trial.number + 1)
             
@@ -65,7 +58,6 @@ class BenchmarkCallback:
         if study.best_value is not None:
             best_value_str = f"{study.best_value:.2f}"
             
-        # Gesamtlaufzeit seit dem ersten Trial berechnen
         total_elapsed_str = ""
         if 'start_time' in study.user_attrs:
              total_elapsed_seconds = int(now - study.user_attrs['start_time'])
@@ -80,7 +72,6 @@ class BenchmarkCallback:
             sys.stdout.write('\n')
             sys.stdout.flush()
 
-
 DATA = None
 MODEL = None
 SCALER = None
@@ -92,21 +83,33 @@ def load_settings():
 
 def objective(trial):
     params = {
-        "strategy": {"prediction_threshold": trial.suggest_float("prediction_threshold", 0.51, 0.75)},
+        "strategy": {
+            "prediction_threshold": trial.suggest_float("prediction_threshold", 0.51, 0.85),
+            # NEU: Optuna findet die besten Schwellenwerte für den normalisierten ATR
+            "min_natr": trial.suggest_float("min_natr", 0.1, 1.0),
+            "max_natr": trial.suggest_float("max_natr", 1.0, 5.0)
+        },
         "risk": {
             "risk_per_trade_pct": trial.suggest_float("risk_per_trade_pct", 0.5, 5.0),
-            "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.0, 5.0),
+            "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 5.0),
             "leverage": trial.suggest_int("leverage", 1, 20),
             "margin_mode": "isolated"
         },
         "behavior": { "use_longs": True, "use_shorts": False }
     }
+    
+    # Stelle sicher, dass max > min ist
+    if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]:
+        return -999.0 # Ungültige Kombination, sofort verwerfen
+
     opti_settings = SETTINGS.get('optimization_settings', {})
     backtester = Backtester(data=DATA, model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     metrics = backtester.run()
     max_drawdown_constraint = opti_settings.get('constraints', {}).get('max_drawdown_pct', 30)
-    if metrics['max_drawdown_pct'] > max_drawdown_constraint:
-        return -999.0
+    
+    if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 10:
+        return -999.0 # Bestrafe auch, wenn zu wenige Trades gemacht wurden
+        
     score = metrics['total_pnl_pct'] / (metrics['max_drawdown_pct'] + 1)
     return score if not pd.isna(score) else -999.0
 
@@ -117,13 +120,16 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'}
     exchange = Exchange(dummy_account)
     
-    ema_period = SETTINGS['strategy_filters'].get('ema_period', 200)
+    filter_conf = SETTINGS.get('strategy_filters', {})
+    ema_period = filter_conf.get('ema_period', 200)
+    atr_period = filter_conf.get('atr_period', 14)
+    
     data_raw = get_market_data(exchange, symbol, timeframe, start_date)
     if data_raw.empty:
         logging.error(f"Keine Daten für {symbol}. Überspringe.")
         return None
         
-    DATA = create_ann_features(data_raw[['open', 'high', 'low', 'close', 'volume']], ema_period=ema_period)
+    DATA = create_ann_features(data_raw, ema_period=ema_period, atr_period=atr_period)
     
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
@@ -135,9 +141,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         return None
 
     study = optuna.create_study(direction="maximize")
-    
     study.set_user_attr('start_time', time.time())
-    
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
     
     study.optimize(
@@ -147,17 +151,22 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         callbacks=[benchmark_callback]
     )
     
-    if not study.best_trial:
-        logging.warning(f"Optuna fand keine gültige Lösung für {symbol} ({timeframe}).")
+    if not study.best_trial or study.best_value <= 0:
+        logging.warning(f"Optuna fand keine profitable Lösung für {symbol} ({timeframe}).")
         return None
 
     best_params_dict = study.best_trial.params
     best_score = study.best_trial.value
     logging.info(f"Beste Parameter für {symbol} ({timeframe}) gefunden. Score: {best_score:.2f}")
 
+    # NEU: Die optimierten ATR-Werte werden in die finale Konfiguration übernommen
     final_config = {
         "market": {"symbol": symbol, "timeframe": timeframe},
-        "strategy": {"prediction_threshold": best_params_dict['prediction_threshold']},
+        "strategy": {
+            "prediction_threshold": best_params_dict['prediction_threshold'],
+            "min_natr": best_params_dict['min_natr'],
+            "max_natr": best_params_dict['max_natr']
+        },
         "risk": {
             "risk_per_trade_pct": best_params_dict['risk_per_trade_pct'],
             "risk_reward_ratio": best_params_dict['risk_reward_ratio'],
@@ -166,6 +175,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         },
         "behavior": {"use_longs": True, "use_shorts": False}
     }
+    
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
@@ -186,6 +196,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     }
 
 def main():
+    # ... (Diese Funktion bleibt unverändert) ...
     global SETTINGS
     SETTINGS = load_settings()
     parser = argparse.ArgumentParser(description="L-Bot Parameter Optimizer")
