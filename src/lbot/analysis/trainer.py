@@ -7,16 +7,14 @@ import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from joblib import dump as joblib_dump
 import logging
-# NEU: Importiere den EarlyStopping Callback
 from tensorflow.keras.callbacks import EarlyStopping
 
+# ... (Imports und Pfade bleiben unverändert) ...
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..'))
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
-
 from lbot.utils.exchange import Exchange
 from lbot.utils.lstm_model import create_ann_features, create_sequences, create_lstm_model
 from lbot.utils.data_handler import get_market_data
-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def load_settings():
@@ -24,30 +22,32 @@ def load_settings():
         return json.load(f)
 
 def train_for_symbol(symbol, timeframe, start_date, settings):
-    # ... (der Anfang der Funktion bleibt unverändert) ...
     logging.info(f"Starte LSTM-Trainingsprozess für {symbol} auf {timeframe}...")
     
-    model_conf = settings['model_settings']
+    model_conf = settings.get('model_settings', {})
     exchange = Exchange({'apiKey': 'dummy', 'secret': 'dummy', 'password': 'dummy'})
     data = get_market_data(exchange, symbol, timeframe, start_date)
     
-    if data.empty or len(data) < 250: # Mindestanzahl an Daten leicht erhöht
+    if data.empty or len(data) < 250:
         logging.warning(f"Nicht genug Daten für {symbol} ({timeframe}). Überspringe.")
         return
 
-    ema_period = settings.get('strategy_filters', {}).get('ema_period', 200)
-    data_with_features = create_ann_features(data[['open', 'high', 'low', 'close', 'volume']], ema_period=ema_period)
+    filter_conf = settings.get('strategy_filters', {})
+    ema_period = filter_conf.get('ema_period', 200)
+    atr_period = filter_conf.get('atr_period', 14)
+    data_with_features = create_ann_features(data, ema_period=ema_period, atr_period=atr_period)
     
-    # ... (Daten skalieren und Sequenzen erstellen bleibt unverändert) ...
-    feature_columns_to_scale = data_with_features.columns.drop(['close', f'ema_{ema_period}'], errors='ignore')
+    cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
+    feature_columns_to_scale = data_with_features.columns.drop(cols_to_drop_for_scaling, errors='ignore')
+    
     scaler = StandardScaler()
     data_with_features[feature_columns_to_scale] = scaler.fit_transform(data_with_features[feature_columns_to_scale])
     
+    # MODIFIZIERT: 'threshold' wird nicht mehr benötigt
     X, y = create_sequences(
         data=data_with_features, 
-        sequence_length=model_conf['sequence_length'],
-        future_steps=model_conf['future_steps'],
-        threshold=model_conf['prediction_threshold_classify']
+        sequence_length=model_conf.get('sequence_length', 24),
+        future_steps=model_conf.get('future_steps', 5)
     )
     
     if len(X) == 0:
@@ -56,24 +56,22 @@ def train_for_symbol(symbol, timeframe, start_date, settings):
     logging.info(f"{len(X)} Trainings-Sequenzen erstellt.")
 
     num_features = X.shape[2]
-    model = create_lstm_model(model_conf['sequence_length'], num_features)
+    model = create_lstm_model(model_conf.get('sequence_length', 24), num_features)
     
-    # NEU: Definiere den EarlyStopping Callback
-    # Es stoppt, wenn sich der 'val_loss' für 5 Epochen ('patience=5') nicht verbessert.
-    early_stopping = EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True)
+    # EarlyStopping überwacht jetzt 'val_mae' (mittlerer absoluter Fehler)
+    early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, mode='min')
 
-    logging.info(f"Trainiere LSTM-Modell mit Early Stopping...")
+    logging.info(f"Trainiere LSTM-Regressions-Modell mit Early Stopping...")
     model.fit(
         X, y, 
-        epochs=model_conf['epochs'], 
-        batch_size=model_conf['batch_size'], 
-        validation_split=model_conf['validation_split'], 
-        # NEU: Füge den Callback zum Trainingsprozess hinzu
+        epochs=model_conf.get('epochs', 50), 
+        batch_size=model_conf.get('batch_size', 32), 
+        validation_split=model_conf.get('validation_split', 0.1), 
         callbacks=[early_stopping],
         verbose=1
     )
 
-    # ... (der Rest der Funktion zum Speichern bleibt unverändert) ...
+    # ... (Rest der Funktion zum Speichern bleibt unverändert) ...
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     models_dir = os.path.join(PROJECT_ROOT, 'artifacts', 'models')
     os.makedirs(models_dir, exist_ok=True)
@@ -87,14 +85,18 @@ def main():
     # ... (main Funktion bleibt unverändert) ...
     settings = load_settings()
     parser = argparse.ArgumentParser(description="L-Bot LSTM Model Trainer")
-    parser.add_argument('--symbols', required=True, type=str, help="Symbole (z.B. 'BTC ETH')")
-    parser.add_argument('--timeframes', required=True, type=str, help="Timeframes (z.B. '1h 4h')")
+    parser.add_argument('--symbols', required=True, type=str)
+    parser.add_argument('--timeframes', required=True, type=str)
     parser.add_argument('--start_date', type=str, default='2020-01-01')
     args = parser.parse_args()
     symbols = [s.upper() + "/USDT:USDT" for s in args.symbols.split()]
     timeframes = args.timeframes.split()
+    total_jobs = len(symbols) * len(timeframes)
+    job_count = 0
     for symbol in symbols:
         for timeframe in timeframes:
+            job_count += 1
+            logging.info(f"--- Paket {job_count}/{total_jobs}: Start für {symbol} ({timeframe}) ---")
             try:
                 train_for_symbol(symbol, timeframe, args.start_date, settings)
             except Exception as e:
