@@ -6,41 +6,39 @@ import pandas as pd
 import ccxt
 from datetime import datetime, timezone
 from tqdm import tqdm
+import time # HIER IST DIE KORREKTUR
 
 # Füge das Hauptverzeichnis zum Pfad hinzu, um lbot-Module zu finden
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(PROJECT_ROOT)
 
-from src.lbot.utils.data_handler import get_cache_filepath # Wir nutzen die gleiche Logik für Dateipfade
+# Pfad-Logik aus data_handler importieren
+HISTORY_DIR = os.path.join(PROJECT_ROOT, 'data', 'history')
+def get_cache_filepath(symbol, timeframe):
+    safe_symbol = symbol.replace('/', '_').replace(':', '')
+    return os.path.join(HISTORY_DIR, f"{safe_symbol}_{timeframe}.parquet")
 
 def download_all_data(symbol, timeframe, start_date_str='2020-01-01'):
     """
     Lädt historische OHLCV-Daten von Binance in Blöcken und speichert sie.
     Aktualisiert vorhandene Dateien, anstatt alles neu zu laden.
     """
-    # Wir verwenden Binance für den Download, da sie die beste Historie haben
     exchange = ccxt.binance()
-    
-    # Konvertiere das Startdatum in einen Millisekunden-Timestamp
     since = int(datetime.strptime(start_date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc).timestamp() * 1000)
     
-    # Passe den Symbolnamen für Binance an (z.B. BTC/USDT:USDT -> BTC/USDT)
     binance_symbol = symbol.split(':')[0]
-    
-    # Pfad zur Zieldatei
     filepath = get_cache_filepath(binance_symbol, timeframe)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     
-    # Prüfe, ob bereits Daten vorhanden sind und setze den Startpunkt
+    df_existing = None
     if os.path.exists(filepath):
-        print(f"Bestehende Datei gefunden für {binance_symbol} ({timeframe}). Lade nur neue Daten...")
+        print(f"Bestehende Datei für {binance_symbol} ({timeframe}) gefunden. Lade nur neue Daten...")
         df_existing = pd.read_parquet(filepath)
         if not df_existing.empty:
             since = int(df_existing.index[-1].timestamp() * 1000) + 1
 
     all_data = []
     
-    # TQDM für den Fortschrittsbalken initialisieren
     pbar = tqdm(desc=f"Download {binance_symbol} ({timeframe})")
     
     while True:
@@ -58,38 +56,39 @@ def download_all_data(symbol, timeframe, start_date_str='2020-01-01'):
             since = ohlcv[-1][0] + 1
             pbar.update(len(ohlcv))
             
-            # Respektiere die Rate Limits von Binance
             time.sleep(exchange.rateLimit / 1000)
 
         except ccxt.NetworkError as e:
-            print(f"Netzwerkfehler: {e}. Warte 30 Sekunden...")
+            print(f" Netzwerkfehler: {e}. Warte 30 Sekunden...")
             time.sleep(30)
         except Exception as e:
-            print(f"Ein Fehler ist aufgetreten: {e}")
+            print(f" Ein Fehler ist aufgetreten: {e}")
             break
             
     pbar.close()
 
     if not all_data:
         print("Keine neuen Daten zum Herunterladen gefunden.")
+        # Wenn bereits eine Datei existiert, stellen wir sicher, dass sie nicht leer ist
+        if df_existing is not None and not df_existing.empty:
+            df_existing.to_parquet(filepath)
         return
 
     df_new = pd.DataFrame(all_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df_new['timestamp'] = pd.to_datetime(df_new['timestamp'], unit='ms', utc=True)
     df_new.set_index('timestamp', inplace=True)
 
-    # Kombiniere alte und neue Daten
-    if 'df_existing' in locals() and not df_existing.empty:
+    if df_existing is not None and not df_existing.empty:
         df_combined = pd.concat([df_existing, df_new])
     else:
         df_combined = df_new
 
-    # Duplikate entfernen und speichern
     df_combined = df_combined[~df_combined.index.duplicated(keep='last')]
     df_combined.sort_index(inplace=True)
     df_combined.to_parquet(filepath)
     
     print(f"Erfolgreich! {len(df_combined)} Kerzen für {binance_symbol} ({timeframe}) gespeichert in {filepath}")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="L-Bot Daten-Downloader")
