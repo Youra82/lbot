@@ -10,9 +10,12 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from lbot.utils.exchange import Exchange
-from lbot.utils.lstm_model import create_ann_features, create_sequences, load_model_and_scaler
+from lbot.utils.lstm_model import create_ann_features
 from lbot.utils.data_handler import get_market_data
 from lbot.analysis.backtester import Backtester
+# KORRIGIERT: Lade auch create_sequences
+from lbot.utils.lstm_model import create_sequences, load_model_and_scaler
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -44,7 +47,7 @@ class BenchmarkCallback:
         sys.stdout.write('\r' + message.ljust(100)); sys.stdout.flush()
         if (trial.number + 1)==self.n_trials: sys.stdout.write('\n'); sys.stdout.flush()
 
-DATA = None
+DATA_WITH_FEATURES = None
 MODEL = None
 SCALER = None
 SETTINGS = None
@@ -69,7 +72,7 @@ def objective(trial):
         if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]: return -999.0
 
         opti_settings = SETTINGS.get('optimization_settings', {})
-        backtester = Backtester(data=DATA.copy(), model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
+        backtester = Backtester(data=DATA_WITH_FEATURES.copy(), model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
         metrics = backtester.run()
 
         if OPTIM_MODE == "strict":
@@ -77,7 +80,7 @@ def objective(trial):
             min_trades = 20
             if (metrics['max_drawdown_pct'] > constraints.get('max_drawdown_pct', 99) or metrics['win_rate'] < constraints.get('min_win_rate_pct', 0) or metrics['total_pnl_pct'] < constraints.get('min_pnl_pct', -100) or metrics['num_trades'] < min_trades):
                 return -999.0
-        else: # "find_best"
+        else:
             if metrics['max_drawdown_pct'] > 80 or metrics['num_trades'] < 5: return -999.0
             
         pnl = metrics['total_pnl_pct']; drawdown = metrics['max_drawdown_pct']; win_rate = metrics.get('win_rate', 0); num_trades = metrics.get('num_trades', 0)
@@ -89,7 +92,7 @@ def objective(trial):
         return -999.0
 
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
-    global DATA, MODEL, SCALER
+    global DATA_WITH_FEATURES, MODEL, SCALER
     logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
     
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy'}
@@ -99,7 +102,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     if raw_data.empty or len(raw_data) < 400:
         logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe."); return None
         
-    DATA = create_ann_features(raw_data)
+    DATA_WITH_FEATURES = create_ann_features(raw_data)
 
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
@@ -140,7 +143,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     with open(config_path, 'w') as f: json.dump(final_config, f, indent=4)
     logging.info(f"Beste Konfiguration gespeichert in: {config_path}")
 
-    final_backtester = Backtester(data=DATA.copy(), model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
+    final_backtester = Backtester(data=DATA_WITH_FEATURES.copy(), model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=SETTINGS.get('optimization_settings', {}).get('start_capital', 1000))
     final_metrics = final_backtester.run()
     return {"symbol": symbol, "timeframe": timeframe, "score": best_score, "params": final_config, "metrics": final_metrics}
 
