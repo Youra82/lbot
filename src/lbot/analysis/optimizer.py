@@ -10,42 +10,39 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..
 sys.path.append(os.path.join(PROJECT_ROOT, 'src'))
 
 from lbot.utils.exchange import Exchange
-from lbot.utils.lstm_model import create_ann_features, load_model_and_scaler
+from lbot.utils.lstm_model import create_ann_features, create_sequences, load_model_and_scaler
 from lbot.utils.data_handler import get_market_data
 from lbot.analysis.backtester import Backtester
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class BenchmarkCallback:
+    # ... (Klasse bleibt unverändert) ...
     def __init__(self, n_trials, n_jobs):
-        self.n_trials = n_trials
-        self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
-        self.trial_durations = deque(maxlen=20) 
-        self.last_time = None
+        self.n_trials=n_trials; self.n_jobs=n_jobs if n_jobs!=-1 else os.cpu_count(); self.trial_durations=deque(maxlen=20); self.last_time=None
     def _format_seconds(self, seconds: int) -> str:
-        minutes, sec = divmod(seconds, 60)
-        return f"{minutes}m {sec}s"
+        minutes, sec=divmod(seconds, 60); return f"{minutes}m {sec}s"
     def __call__(self, study, trial):
-        now = time.time()
+        now=time.time()
         if self.last_time is not None: self.trial_durations.append(now - self.last_time)
-        self.last_time = now
-        eta_str = "berechne..."
+        self.last_time=now
+        eta_str="berechne..."
         if len(self.trial_durations) > 5:
-            avg_time_per_trial = sum(self.trial_durations) / len(self.trial_durations)
-            remaining_trials = self.n_trials - (trial.number + 1)
-            eta_seconds = 0
-            if self.n_jobs > 1: eta_seconds = int(avg_time_per_trial * remaining_trials / self.n_jobs)
-            else: eta_seconds = int(avg_time_per_trial * remaining_trials)
-            eta_str = f"ca. {self._format_seconds(eta_seconds)}"
-        best_value_str = "N/A"
-        if study.best_value is not None: best_value_str = f"{study.best_value:.2f}"
-        total_elapsed_str = ""
+            avg_time_per_trial=sum(self.trial_durations)/len(self.trial_durations)
+            remaining_trials=self.n_trials - (trial.number + 1)
+            eta_seconds=0
+            if self.n_jobs > 1: eta_seconds=int(avg_time_per_trial * remaining_trials / self.n_jobs)
+            else: eta_seconds=int(avg_time_per_trial * remaining_trials)
+            eta_str=f"ca. {self._format_seconds(eta_seconds)}"
+        best_value_str="N/A"
+        if study.best_value is not None: best_value_str=f"{study.best_value:.2f}"
+        total_elapsed_str=""
         if 'start_time' in study.user_attrs:
-             total_elapsed_seconds = int(now - study.user_attrs['start_time'])
-             total_elapsed_str = f"Laufzeit: {self._format_seconds(total_elapsed_seconds)} | "
-        message = f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | {total_elapsed_str}ETA: {eta_str} | Bester Score: {best_value_str}"
+             total_elapsed_seconds=int(now - study.user_attrs['start_time'])
+             total_elapsed_str=f"Laufzeit: {self._format_seconds(total_elapsed_seconds)} | "
+        message=f"    - Optimierung läuft: Trial {trial.number + 1}/{self.n_trials} | {total_elapsed_str}ETA: {eta_str} | Bester Score: {best_value_str}"
         sys.stdout.write('\r' + message.ljust(100)); sys.stdout.flush()
-        if (trial.number + 1) == self.n_trials: sys.stdout.write('\n'); sys.stdout.flush()
+        if (trial.number + 1)==self.n_trials: sys.stdout.write('\n'); sys.stdout.flush()
 
 DATA = None
 MODEL = None
@@ -54,8 +51,7 @@ SETTINGS = None
 OPTIM_MODE = "strict" 
 
 def load_settings():
-    with open(os.path.join(PROJECT_ROOT, 'settings.json'), 'r') as f:
-        return json.load(f)
+    with open(os.path.join(PROJECT_ROOT, 'settings.json'), 'r') as f: return json.load(f)
 
 def objective(trial):
     try:
@@ -69,7 +65,7 @@ def objective(trial):
             "risk": { "risk_per_trade_pct": trial.suggest_float("risk_per_trade_pct", 0.5, 3.0), "risk_reward_ratio": trial.suggest_float("risk_reward_ratio", 1.5, 5.0), "leverage": trial.suggest_int("leverage", 1, 10)},
             "behavior": { "use_longs": True, "use_shorts": False }
         }
-
+        
         if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]: return -999.0
 
         opti_settings = SETTINGS.get('optimization_settings', {})
@@ -79,19 +75,12 @@ def objective(trial):
         if OPTIM_MODE == "strict":
             constraints = opti_settings.get('constraints', {})
             min_trades = 20
-            if (metrics['max_drawdown_pct'] > constraints.get('max_drawdown_pct', 99) or
-                metrics['win_rate'] < constraints.get('min_win_rate_pct', 0) or
-                metrics['total_pnl_pct'] < constraints.get('min_pnl_pct', -100) or
-                metrics['num_trades'] < min_trades):
+            if (metrics['max_drawdown_pct'] > constraints.get('max_drawdown_pct', 99) or metrics['win_rate'] < constraints.get('min_win_rate_pct', 0) or metrics['total_pnl_pct'] < constraints.get('min_pnl_pct', -100) or metrics['num_trades'] < min_trades):
                 return -999.0
         else: # "find_best"
-            if metrics['max_drawdown_pct'] > 80 or metrics['num_trades'] < 5:
-                return -999.0
-
-        pnl = metrics['total_pnl_pct']
-        drawdown = metrics['max_drawdown_pct']
-        win_rate = metrics.get('win_rate', 0)
-        num_trades = metrics.get('num_trades', 0)
+            if metrics['max_drawdown_pct'] > 80 or metrics['num_trades'] < 5: return -999.0
+            
+        pnl = metrics['total_pnl_pct']; drawdown = metrics['max_drawdown_pct']; win_rate = metrics.get('win_rate', 0); num_trades = metrics.get('num_trades', 0)
         trade_penalty = 1.0 if num_trades > 50 else num_trades / 50.0
         if drawdown > 0: score = (pnl * (win_rate / 100)) / drawdown * trade_penalty
         else: score = pnl * (win_rate / 100) * trade_penalty
@@ -102,15 +91,14 @@ def objective(trial):
 def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     global DATA, MODEL, SCALER
     logging.info(f"Starte Optimierungsprozess für {symbol} ({timeframe})...")
-
+    
     dummy_account = {'apiKey': 'dummy', 'secret': 'dummy'}
     exchange = Exchange(dummy_account)
-
+    
     raw_data = get_market_data(exchange, symbol, timeframe, start_date)
     if raw_data.empty or len(raw_data) < 400:
-        logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe.")
-        return None
-
+        logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe."); return None
+        
     DATA = create_ann_features(raw_data)
 
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
@@ -119,18 +107,16 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     MODEL, SCALER = load_model_and_scaler(model_path, scaler_path)
 
     if MODEL is None or SCALER is None:
-        logging.error(f"Modell/Scaler für {symbol} nicht gefunden. Überspringe.")
-        return None
+        logging.error(f"Modell/Scaler für {symbol} nicht gefunden. Überspringe."); return None
 
     study = optuna.create_study(direction="maximize")
     study.set_user_attr('start_time', time.time())
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
-
+    
     study.optimize(objective, n_trials=trials, n_jobs=jobs, callbacks=[benchmark_callback], catch=(Exception,))
-
+    
     if not study.best_trial or study.best_value <= 0:
-        logging.warning(f"Optuna fand keine profitable Lösung für {symbol} ({timeframe}).")
-        return None
+        logging.warning(f"Optuna fand keine profitable Lösung für {symbol} ({timeframe})."); return None
 
     best_params_dict = study.best_trial.params
     best_score = study.best_trial.value
@@ -147,7 +133,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         "risk": { "risk_per_trade_pct": best_params_dict['risk_per_trade_pct'], "risk_reward_ratio": best_params_dict['risk_reward_ratio'], "leverage": best_params_dict['leverage']},
         "behavior": {"use_longs": True, "use_shorts": False}
     }
-
+    
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     os.makedirs(config_dir, exist_ok=True)
     config_path = os.path.join(config_dir, f'config_{safe_filename}.json')
