@@ -1,3 +1,4 @@
+cat << 'EOF' > src/lbot/analysis/optimizer.py
 # src/lbot/analysis/optimizer.py
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
@@ -17,11 +18,14 @@ from lbot.analysis.backtester import Backtester
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class BenchmarkCallback:
-    # ... (Klasse bleibt unverändert) ...
     def __init__(self, n_trials, n_jobs):
-        self.n_trials = n_trials; self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count(); self.trial_durations = deque(maxlen=20); self.last_time = None
+        self.n_trials = n_trials
+        self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
+        self.trial_durations = deque(maxlen=20) 
+        self.last_time = None
     def _format_seconds(self, seconds: int) -> str:
-        minutes, sec = divmod(seconds, 60); return f"{minutes}m {sec}s"
+        minutes, sec = divmod(seconds, 60)
+        return f"{minutes}m {sec}s"
     def __call__(self, study, trial):
         now = time.time()
         if self.last_time is not None: self.trial_durations.append(now - self.last_time)
@@ -44,7 +48,7 @@ class BenchmarkCallback:
         sys.stdout.write('\r' + message.ljust(100)); sys.stdout.flush()
         if (trial.number + 1) == self.n_trials: sys.stdout.write('\n'); sys.stdout.flush()
 
-DATA = None # Hält jetzt die Daten MIT Features
+DATA = None
 MODEL = None
 SCALER = None
 SETTINGS = None
@@ -85,21 +89,13 @@ def objective(trial):
             if metrics['max_drawdown_pct'] > 80 or metrics['num_trades'] < 5:
                 return -999.0
             
-        # VERBESSERTE SCORE-FUNKTION
         pnl = metrics['total_pnl_pct']
         drawdown = metrics['max_drawdown_pct']
         win_rate = metrics.get('win_rate', 0)
         num_trades = metrics.get('num_trades', 0)
-        
-        # Bestrafe Strategien, die kaum handeln
         trade_penalty = 1.0 if num_trades > 50 else num_trades / 50.0
-
-        # Berechne den Score
-        if drawdown > 0:
-            score = (pnl * (win_rate / 100)) / drawdown * trade_penalty
-        else:
-            score = pnl * (win_rate / 100) * trade_penalty
-
+        if drawdown > 0: score = (pnl * (win_rate / 100)) / drawdown * trade_penalty
+        else: score = pnl * (win_rate / 100) * trade_penalty
         return score if not pd.isna(score) else -999.0
     except Exception:
         return -999.0
@@ -116,7 +112,6 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
         logging.warning(f"Nicht genug Rohdaten für {symbol}. Überspringe.")
         return None
         
-    # Erstelle die Features EINMAL vor der Optimierung
     DATA = create_ann_features(raw_data)
 
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
@@ -151,8 +146,7 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
             "max_natr": best_params_dict['max_natr']
         },
         "risk": { "risk_per_trade_pct": best_params_dict['risk_per_trade_pct'], "risk_reward_ratio": best_params_dict['risk_reward_ratio'], "leverage": best_params_dict['leverage']},
-        "behavior": {"use_longs": True, "use_shorts": False},
-        # HINWEIS: Filter-Perioden sind jetzt fest, nicht mehr Teil der Config
+        "behavior": {"use_longs": True, "use_shorts": False}
     }
     
     config_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
@@ -161,7 +155,6 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     with open(config_path, 'w') as f: json.dump(final_config, f, indent=4)
     logging.info(f"Beste Konfiguration gespeichert in: {config_path}")
 
-    opti_settings = SETTINGS.get('optimization_settings', {})
     final_backtester = Backtester(data=DATA.copy(), model=MODEL, scaler=SCALER, params=final_config, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     final_metrics = final_backtester.run()
     return {"symbol": symbol, "timeframe": timeframe, "score": best_score, "params": final_config, "metrics": final_metrics}
@@ -170,7 +163,7 @@ def main():
     global SETTINGS, OPTIM_MODE
     SETTINGS = load_settings()
     parser = argparse.ArgumentParser(description="L-Bot Parameter Optimizer")
-    parser.add_argument('--mode', type=str, default='strict', help="Optimierungs-Modus: 'strict' oder 'find_best'")
+    parser.add_argument('--mode', type=str, default='strict')
     parser.add_argument('--symbols', required=True, type=str)
     parser.add_argument('--timeframes', required=True, type=str)
     parser.add_argument('--start_date', required=True, type=str)
@@ -199,3 +192,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+EOF
