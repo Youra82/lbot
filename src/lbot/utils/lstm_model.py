@@ -1,4 +1,3 @@
-cat << 'EOF' > src/lbot/utils/lstm_model.py
 # src/lbot/utils/lstm_model.py
 import pandas as pd
 import numpy as np
@@ -17,7 +16,7 @@ RSI_EMA_PERIOD = 21
 def create_ann_features(df_in):
     """ Erstellt ein festes Set von technischen Indikatoren und relativen Features. """
     df = df_in.copy()
-    
+
     # --- Basis-Indikatoren ---
     df['rsi'] = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
     df['adx'] = ta.trend.ADXIndicator(high=df['high'], low=df['low'], close=df['close'], window=14).adx()
@@ -29,14 +28,14 @@ def create_ann_features(df_in):
     atr_indicator = ta.volatility.AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=ATR_PERIOD)
     df[f'atr_{ATR_PERIOD}'] = atr_indicator.average_true_range()
     df[f'natr_{ATR_PERIOD}'] = (df[f'atr_{ATR_PERIOD}'] / df['close']) * 100
-    
+
     # --- Relative Features ---
     df[f'ema_{EMA_SHORT_PERIOD}'] = ta.trend.EMAIndicator(close=df['close'], window=EMA_SHORT_PERIOD).ema_indicator()
     df[f'ema_{EMA_MEDIUM_PERIOD}'] = ta.trend.EMAIndicator(close=df['close'], window=EMA_MEDIUM_PERIOD).ema_indicator()
-    
+
     df['price_vs_ema_short'] = (df['close'] / df[f'ema_{EMA_SHORT_PERIOD}'] - 1) * 100
     df['price_vs_ema_medium'] = (df['close'] / df[f'ema_{EMA_MEDIUM_PERIOD}'] - 1) * 100
-    
+
     df['ema_rsi'] = ta.trend.EMAIndicator(close=df['rsi'], window=RSI_EMA_PERIOD).ema_indicator()
     df['rsi_vs_ema_rsi'] = df['rsi'] - df['ema_rsi']
 
@@ -78,4 +77,3 @@ def load_model_and_scaler(model_path, scaler_path):
     except Exception as e:
         print(f"Fehler beim Laden von Modell/Scaler: {e}")
         return None, None
-EOF
