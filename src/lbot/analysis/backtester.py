@@ -1,10 +1,15 @@
 # src/lbot/analysis/backtester.py
-# ... (alle Imports und der Anfang der Klasse bleiben gleich) ...
-import pandas as pd, numpy as np, logging
+import pandas as pd
+import numpy as np
+import logging
+# NEU: Import der MC-Dropout-Funktion
+from ..utils.mc_dropout_predictor import make_mc_prediction
+
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class Backtester:
+    # ... (__init__, _apply_slippage, _is_trend_filter_ok, _is_volatility_filter_ok bleiben unverändert) ...
     def __init__(self, data, model, scaler, params, settings, start_capital=1000):
-        # ... (__init__ bleibt unverändert) ...
         self.data = data
         self.model = model
         self.scaler = scaler
@@ -19,8 +24,6 @@ class Backtester:
         self.slippage = backtest_conf.get('slippage_pct', 0.02) / 100
         self.trades = []
         self.equity_curve = [start_capital]
-
-    # ... (_apply_slippage, _is_trend_filter_ok, _is_volatility_filter_ok bleiben unverändert) ...
     def _apply_slippage(self, price, side):
         if side == 'long': return price * (1 + self.slippage)
         elif side == 'short': return price * (1 - self.slippage)
@@ -49,6 +52,7 @@ class Backtester:
             filter_params = self.params.get('filters', {})
             ema_period = filter_params.get('ema_period', self.filter_conf.get('ema_period', 200))
             atr_period = filter_params.get('atr_period', self.filter_conf.get('atr_period', 14))
+            mc_samples = self.settings.get('model_settings', {}).get('mc_dropout_samples', 30)
 
             cols_to_drop_for_scaling = ['close', f'ema_{ema_period}', f'atr_{atr_period}', f'natr_{atr_period}']
             feature_columns_to_scale = self.data.columns.drop(cols_to_drop_for_scaling, errors='ignore')
@@ -74,15 +78,17 @@ class Backtester:
                     model_input_values = sequence_df[model_input_feature_names].values
                     input_data = np.expand_dims(model_input_values, axis=0)
                     
-                    prediction = self.model.predict(input_data, verbose=0)[0][0]
+                    # MODIFIZIERT: Nutze jetzt die MC-Dropout-Vorhersage
+                    mean_pred, std_pred = make_mc_prediction(self.model, input_data, n_samples=mc_samples)
                     
-                    # MODIFIZIERT: Neue Logik für den Einstieg
                     entry_threshold_pct = self.params['strategy'].get('entry_threshold_pct', 1.0)
+                    uncertainty_threshold = self.params['strategy'].get('uncertainty_threshold', 0.01)
                     
-                    # prediction ist z.B. 0.015 für 1.5%
-                    predicted_pct_gain = prediction * 100
+                    predicted_pct_gain = mean_pred * 100
                     
+                    # MODIFIZIERT: Neue Einstiegslogik mit Unsicherheits-Check
                     if (predicted_pct_gain >= entry_threshold_pct and 
+                        std_pred <= uncertainty_threshold and
                         self.params['behavior'].get('use_longs', False) and 
                         self._is_trend_filter_ok(i, 'long') and
                         self._is_volatility_filter_ok(i)):
