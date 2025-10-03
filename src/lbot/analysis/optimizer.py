@@ -82,10 +82,10 @@ def load_settings():
         return json.load(f)
 
 def objective(trial):
+    # ... (Diese Funktion bleibt unverändert) ...
     params = {
         "strategy": {
             "prediction_threshold": trial.suggest_float("prediction_threshold", 0.51, 0.85),
-            # NEU: Optuna findet die besten Schwellenwerte für den normalisierten ATR
             "min_natr": trial.suggest_float("min_natr", 0.1, 1.0),
             "max_natr": trial.suggest_float("max_natr", 1.0, 5.0)
         },
@@ -97,19 +97,14 @@ def objective(trial):
         },
         "behavior": { "use_longs": True, "use_shorts": False }
     }
-    
-    # Stelle sicher, dass max > min ist
     if params["strategy"]["max_natr"] <= params["strategy"]["min_natr"]:
-        return -999.0 # Ungültige Kombination, sofort verwerfen
-
+        return -999.0
     opti_settings = SETTINGS.get('optimization_settings', {})
     backtester = Backtester(data=DATA, model=MODEL, scaler=SCALER, params=params, settings=SETTINGS, start_capital=opti_settings.get('start_capital', 1000))
     metrics = backtester.run()
     max_drawdown_constraint = opti_settings.get('constraints', {}).get('max_drawdown_pct', 30)
-    
     if metrics['max_drawdown_pct'] > max_drawdown_constraint or metrics['num_trades'] < 10:
-        return -999.0 # Bestrafe auch, wenn zu wenige Trades gemacht wurden
-        
+        return -999.0
     score = metrics['total_pnl_pct'] / (metrics['max_drawdown_pct'] + 1)
     return score if not pd.isna(score) else -999.0
 
@@ -144,11 +139,13 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     study.set_user_attr('start_time', time.time())
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
     
+    # NEU: Wir sagen Optuna, dass es bei Fehlern in einem Trial nicht den ganzen Traceback ausgeben soll
     study.optimize(
         objective,
         n_trials=trials,
         n_jobs=jobs,
-        callbacks=[benchmark_callback]
+        callbacks=[benchmark_callback],
+        catch=(Exception,) # Fängt alle Fehler ab und lässt den Prozess weiterlaufen
     )
     
     if not study.best_trial or study.best_value <= 0:
@@ -159,7 +156,6 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
     best_score = study.best_trial.value
     logging.info(f"Beste Parameter für {symbol} ({timeframe}) gefunden. Score: {best_score:.2f}")
 
-    # NEU: Die optimierten ATR-Werte werden in die finale Konfiguration übernommen
     final_config = {
         "market": {"symbol": symbol, "timeframe": timeframe},
         "strategy": {
