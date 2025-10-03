@@ -1,13 +1,17 @@
 # src/lbot/analysis/optimizer.py
 import os
+# NEU: Unterdrückt informative TensorFlow-Warnungen, die die Anzeige stören.
+# '2' bedeutet, dass nur noch Error-Meldungen von TensorFlow angezeigt werden.
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2' 
+
 import sys
 import argparse
 import json
 import pandas as pd
 import optuna
 import logging
-import time
-from collections import deque # NEU: Import für den gleitenden Durchschnitt
+import time 
+from collections import deque
 
 optuna.logging.set_verbosity(optuna.logging.WARNING)
 
@@ -27,7 +31,7 @@ class BenchmarkCallback:
     def __init__(self, n_trials, n_jobs):
         self.n_trials = n_trials
         self.n_jobs = n_jobs if n_jobs != -1 else os.cpu_count()
-        # NEU: Wir speichern die letzten 20 Trial-Zeiten
+        # Wir speichern die letzten 20 Trial-Zeiten
         self.trial_durations = deque(maxlen=20) 
         self.last_time = None
 
@@ -46,7 +50,7 @@ class BenchmarkCallback:
         eta_str = "berechne..."
         # Beginne mit der Schätzung, nachdem wir ein paar Messungen haben
         if len(self.trial_durations) > 5:
-            # NEU: Nutze den Durchschnitt der letzten Messungen
+            # Nutze den Durchschnitt der letzten Messungen
             avg_time_per_trial = sum(self.trial_durations) / len(self.trial_durations)
             remaining_trials = self.n_trials - (trial.number + 1)
             
@@ -132,7 +136,6 @@ def run_optimization_for_pair(symbol, timeframe, start_date, trials, jobs):
 
     study = optuna.create_study(direction="maximize")
     
-    # NEU: Wir speichern die Startzeit im Study-Objekt, damit der Callback sie nutzen kann
     study.set_user_attr('start_time', time.time())
     
     benchmark_callback = BenchmarkCallback(n_trials=trials, n_jobs=jobs)
