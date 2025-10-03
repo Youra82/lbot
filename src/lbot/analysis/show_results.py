@@ -20,12 +20,11 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
     
     print(f"\nAnalysiere Ergebnisse für: {symbol} ({timeframe})...")
 
-    # Lade Daten
     dummy_exchange = Exchange({'apiKey': 'dummy', 'secret': 'dummy'})
-    ema_period = settings.get('strategy_filters', {}).get('ema_period', 200)
+    
+    # Der data_handler wird jetzt mit dem Startdatum des Backtests aufgerufen
     data_raw = get_market_data(dummy_exchange, symbol, timeframe, start_date)
     
-    # Filtere Daten auf den vom Benutzer gewählten Zeitraum
     data_for_backtest = data_raw.loc[start_date:end_date]
     
     sequence_length = settings.get('model_settings', {}).get('sequence_length', 24)
@@ -33,19 +32,17 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
         print(f"Konnte nicht genügend Daten für {symbol} im Zeitraum {start_date}-{end_date} laden. Überspringe.")
         return None
 
-    data_with_features = create_ann_features(data_for_backtest[['open', 'high', 'low', 'close', 'volume']], ema_period=ema_period)
+    # KORRIGIERTER AUFRUF: Keine 'ema_period' mehr übergeben
+    data_with_features = create_ann_features(data_for_backtest)
     
-    # Lade Modell
     safe_filename = f"{symbol.replace('/', '').replace(':', '')}_{timeframe}"
     model_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_predictor_{safe_filename}.h5')
     scaler_path = os.path.join(PROJECT_ROOT, 'artifacts', 'models', f'ann_scaler_{safe_filename}.joblib')
     model, scaler = load_model_and_scaler(model_path, scaler_path)
     if not model or not scaler:
-        print(f"Modell/Scaler für {symbol} nicht gefunden. Überspringe.")
+        print(f"Modell/Scaler für {symbol} nicht gefunden. (Hast du die Pipeline für diese Strategie laufen lassen?)")
         return None
 
-    # Führe Backtest aus
-    # Dies ist der korrigierte Aufruf, der keine unerwarteten Argumente mehr übergibt
     backtester = Backtester(
         data=data_with_features.copy(),
         model=model,
@@ -56,7 +53,6 @@ def run_backtest_for_config(config, start_date, end_date, start_capital, setting
     )
     result = backtester.run()
     
-    # Berechne Endkapital für die Zusammenfassung
     end_capital = start_capital * (1 + result['total_pnl_pct'] / 100)
     
     return {
@@ -78,7 +74,6 @@ def main():
     with open(settings_path, 'r') as f:
         settings = json.load(f)
 
-    # Interaktive Abfrage
     print("\n--- Bitte Konfiguration für den Backtest festlegen ---")
     default_start_date = "2023-01-01"
     start_date_input = input(f"Startdatum (JJJJ-MM-TT) eingeben [Standard: {default_start_date}]: ")
@@ -88,7 +83,7 @@ def main():
     end_date_input = input(f"Enddatum (JJJJ-MM-TT) eingeben [Standard: {default_end_date}]: ")
     end_date = end_date_input if end_date_input else default_end_date
 
-    default_capital = settings['optimization_settings'].get('start_capital', 1000)
+    default_capital = settings.get('optimization_settings', {}).get('start_capital', 1000)
     try:
         start_capital_input = input(f"Startkapital in USDT eingeben [Standard: {default_capital}]: ")
         start_capital = int(start_capital_input) if start_capital_input else default_capital
@@ -100,11 +95,10 @@ def main():
 
     configs_dir = os.path.join(PROJECT_ROOT, 'src', 'lbot', 'strategy', 'configs')
     if not os.path.isdir(configs_dir):
-        print(f"Fehler: Konfigurations-Ordner nicht gefunden: {configs_dir}")
+        print(f"Fehler: Konfigurations-Ordner nicht gefunden in {configs_dir}. (Hast du die Pipeline schon laufen lassen?)")
         return
 
     all_results = []
-    # Gehe durch alle gefundenen Konfigurationsdateien
     for filename in os.listdir(configs_dir):
         if filename.startswith('config_') and filename.endswith('.json'):
             config_path = os.path.join(configs_dir, filename)
@@ -119,7 +113,6 @@ def main():
         print("\nKeine gültigen Konfigurationen zum Analysieren gefunden.")
         return
 
-    # Erstelle einen sauberen DataFrame und sortiere ihn
     results_df = pd.DataFrame(all_results)
     results_df = results_df.sort_values(by="PnL (%)", ascending=False)
 
